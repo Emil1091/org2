@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { getISOWeek } from 'date-fns'
 import { useStore } from '../store/useStore'
 import { STATUS_META, type Task } from '../types'
@@ -48,6 +48,40 @@ interface PlacedBar {
   lane: number
   startIdx: number
   endIdx: number
+}
+
+type DragMode = 'move' | 'resize-l' | 'resize-r'
+
+interface DragState {
+  taskId: string
+  mode: DragMode
+  startX: number
+  startY: number
+  origStart: string
+  origEnd: string
+  delta: number
+  moved: boolean
+  clientX: number
+  clientY: number
+}
+
+/** Fechas resultantes de arrastrar `delta` días según el modo. */
+function applyDelta(
+  d: Pick<DragState, 'mode' | 'origStart' | 'origEnd'>,
+  delta: number,
+): { start: string; end: string } {
+  if (d.mode === 'move') {
+    return {
+      start: addDaysISO(d.origStart, delta),
+      end: addDaysISO(d.origEnd, delta),
+    }
+  }
+  if (d.mode === 'resize-l') {
+    const start = addDaysISO(d.origStart, delta)
+    return { start: start > d.origEnd ? d.origEnd : start, end: d.origEnd }
+  }
+  const end = addDaysISO(d.origEnd, delta)
+  return { start: d.origStart, end: end < d.origStart ? d.origStart : end }
 }
 
 function daySegments(
@@ -146,6 +180,7 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
   const priorities = useStore((s) => s.priorities)
   const settings = useStore((s) => s.settings)
   const moveGroup = useStore((s) => s.moveGroup)
+  const updateTask = useStore((s) => s.updateTask)
 
   const [zoom, setZoom] = useState<Zoom>('day')
   const [preset, setPreset] = useState<Preset>('weeks3')
@@ -217,6 +252,94 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
 
   const todayIdx = diffDays(viewStart, today)
   const todayInRange = todayIdx >= 0 && todayIdx < span
+
+  // ---- Drag & drop de barras ----
+  const [drag, setDrag] = useState<DragState | null>(null)
+  const dragRef = useRef<DragState | null>(null)
+  const suppressClickRef = useRef(false)
+  const dragging = drag !== null
+
+  useEffect(() => {
+    dragRef.current = drag
+  }, [drag])
+
+  useEffect(() => {
+    if (!dragging) return
+    const onMove = (e: PointerEvent) => {
+      setDrag((d) => {
+        if (!d) return d
+        return {
+          ...d,
+          delta: Math.round((e.clientX - d.startX) / dw),
+          moved: d.moved || Math.abs(e.clientX - d.startX) > 3,
+          clientX: e.clientX,
+          clientY: e.clientY,
+        }
+      })
+    }
+    const onUp = (e: PointerEvent) => {
+      const d = dragRef.current
+      dragRef.current = null
+      setDrag(null)
+      if (!d) return
+      const moved = Math.abs(e.clientX - d.startX) > 3
+      suppressClickRef.current = moved
+      if (!moved) return
+      const delta = Math.round((e.clientX - d.startX) / dw)
+      if (delta === 0) return
+      const { start, end } = applyDelta(d, delta)
+      if (start !== d.origStart || end !== d.origEnd) {
+        updateTask(d.taskId, { start, end })
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        suppressClickRef.current = true
+        dragRef.current = null
+        setDrag(null)
+      }
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onKey as unknown as EventListener)
+    window.addEventListener('keydown', onKey)
+    document.body.classList.add('select-none')
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onKey as unknown as EventListener)
+      window.removeEventListener('keydown', onKey)
+      document.body.classList.remove('select-none')
+    }
+  }, [dragging, dw, updateTask])
+
+  const startDrag = (
+    e: RPointerEvent<HTMLElement>,
+    taskId: string,
+    mode: DragMode,
+  ) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    const t = tasks.find((x) => x.id === taskId)
+    if (!t) return
+    const d: DragState = {
+      taskId,
+      mode,
+      startX: e.clientX,
+      startY: e.clientY,
+      origStart: t.start,
+      origEnd: t.end,
+      delta: 0,
+      moved: false,
+      clientX: e.clientX,
+      clientY: e.clientY,
+    }
+    dragRef.current = d
+    setDrag(d)
+  }
+
+  const dragPreview = drag ? applyDelta(drag, drag.delta) : null
 
   const gridBg =
     zoom === 'month'
@@ -323,11 +446,14 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
             {/* Encabezado */}
             <div className="sticky top-0 z-40 flex border-b border-slate-300 bg-white">
               <div
-                className="sticky left-0 z-50 flex items-center border-r-2 border-slate-300 bg-white px-3"
+                className="sticky left-0 z-50 flex flex-col justify-center border-r-2 border-slate-300 bg-white px-3"
                 style={{ width: LEFT_W, minWidth: LEFT_W }}
               >
                 <span className="text-xs font-semibold text-slate-600">
                   Cuadrillas ({sortedGroups.length})
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  arrastrá las barras para mover o estirar
                 </span>
               </div>
               <div style={{ width: totalW }}>
@@ -460,31 +586,52 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                     </div>
 
                     <div className="relative" style={{ width: totalW }}>
-                      {placed.map(({ task: t, lane, startIdx, endIdx }) => {
+                      {placed.map(({ task: t, lane }) => {
+                        const preview =
+                          drag && drag.taskId === t.id
+                            ? applyDelta(drag, drag.delta)
+                            : null
+                        const isDragging = preview !== null
+                        const dispStart = preview?.start ?? t.start
+                        const dispEnd = preview?.end ?? t.end
+                        const sIdx = diffDays(viewStart, dispStart)
+                        const eIdx = diffDays(viewStart, dispEnd)
+                        const visS = Math.max(sIdx, 0)
+                        const visE = Math.min(eIdx, span - 1)
+                        if (visS > visE) return null
                         const prio = priorityById.get(t.priorityId)
                         const color =
                           settings.colorBy === 'priority'
                             ? (prio?.color ?? '#64748b')
                             : STATUS_META[t.status].color
-                        const left = startIdx * dw + 1
-                        const width = Math.max((endIdx - startIdx + 1) * dw - 2, 6)
+                        const left = visS * dw + 1
+                        const width = Math.max((visE - visS + 1) * dw - 2, 6)
                         const top = ROW_PAD + lane * LANE_H
-                        const clippedL = t.start < viewStart
-                        const clippedR = t.end > viewEnd
+                        const clippedL = dispStart < viewStart
+                        const clippedR = dispEnd > viewEnd
                         const satWorks = t.groupIds.some(
                           (id) => groups.find((x) => x.id === id)?.worksSaturday,
                         )
-                        const tooltipRight = startIdx > span * 0.5
+                        const tooltipRight = sIdx > span * 0.5
                         const tooltipBelow = lane === 0 && top < 40
                         return (
                           <button
                             key={g.id + t.id}
-                            onClick={() => onOpenTask(t.id)}
-                            className={`group/bar absolute z-10 flex items-center gap-1 px-1.5 text-left shadow-sm ring-1 ring-black/10 hover:brightness-105 ${
-                              clippedL ? 'rounded-l-none' : 'rounded-md'
-                            } ${clippedR ? 'rounded-r-none' : 'rounded-md'} ${
-                              t.status === 'completada' ? 'opacity-75' : ''
-                            }`}
+                            onClick={() => {
+                              if (suppressClickRef.current) {
+                                suppressClickRef.current = false
+                                return
+                              }
+                              onOpenTask(t.id)
+                            }}
+                            onPointerDown={(e) => startDrag(e, t.id, 'move')}
+                            className={`group/bar absolute z-10 flex cursor-grab touch-none items-center gap-1 px-1.5 text-left shadow-sm ring-1 ring-black/10 select-none ${
+                              isDragging
+                                ? 'z-20 cursor-grabbing shadow-lg brightness-105 ring-2 ring-slate-700/50'
+                                : 'hover:brightness-105'
+                            } ${clippedL ? 'rounded-l-none' : 'rounded-md'} ${
+                              clippedR ? 'rounded-r-none' : 'rounded-md'
+                            } ${t.status === 'completada' ? 'opacity-75' : ''}`}
                             style={{
                               left,
                               top,
@@ -498,6 +645,22 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                               className="absolute inset-y-0 left-0 rounded-[inherit] bg-black/20"
                               style={{ width: `${t.progress}%` }}
                             />
+                            {width > 20 && (
+                              <>
+                                <span
+                                  className="absolute inset-y-0 left-0 z-20 w-1.5 cursor-ew-resize rounded-l-md bg-white/60 opacity-0 group-hover/bar:opacity-100"
+                                  title="Arrastrar para cambiar el inicio"
+                                  onPointerDown={(e) => startDrag(e, t.id, 'resize-l')}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                                <span
+                                  className="absolute inset-y-0 right-0 z-20 w-1.5 cursor-ew-resize rounded-r-md bg-white/60 opacity-0 group-hover/bar:opacity-100"
+                                  title="Arrastrar para cambiar el fin"
+                                  onPointerDown={(e) => startDrag(e, t.id, 'resize-r')}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </>
+                            )}
                             <span className="relative z-10 shrink-0 text-[10px] opacity-90">
                               {STATUS_META[t.status].icon}
                             </span>
@@ -505,39 +668,41 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                               {t.title}
                             </span>
 
-                            <span
-                              className={`pointer-events-none absolute z-50 hidden w-64 rounded-lg bg-slate-900/95 p-3 text-left text-[11px] leading-snug text-white shadow-xl group-hover/bar:block ${
-                                tooltipRight ? 'right-0' : 'left-0'
-                              } ${
-                                tooltipBelow
-                                  ? 'top-full mt-1.5'
-                                  : 'bottom-full mb-1.5'
-                              }`}
-                            >
-                              <span className="mb-1 block text-xs font-semibold">
-                                {t.title}
-                              </span>
-                              <span className="block opacity-90">
-                                {formatDay(t.start)} → {formatDay(t.end)} ·{' '}
-                                {workdayCount(t.start, t.end, satWorks, holidaySet)} días
-                                lab.
-                              </span>
-                              <span className="block opacity-90">
-                                Estado: {STATUS_META[t.status].label} · Prioridad:{' '}
-                                {prio?.name ?? '—'} · Progreso: {t.progress}%
-                              </span>
-                              <span className="block opacity-90">
-                                Cuadrillas:{' '}
-                                {t.groupIds
-                                  .map((id) => groupNameById.get(id) ?? '?')
-                                  .join(', ') || '—'}
-                              </span>
-                              {t.description && (
-                                <span className="mt-1 block opacity-80">
-                                  {t.description}
+                            {!isDragging && (
+                              <span
+                                className={`pointer-events-none absolute z-50 hidden w-64 rounded-lg bg-slate-900/95 p-3 text-left text-[11px] leading-snug text-white shadow-xl group-hover/bar:block ${
+                                  tooltipRight ? 'right-0' : 'left-0'
+                                } ${
+                                  tooltipBelow
+                                    ? 'top-full mt-1.5'
+                                    : 'bottom-full mb-1.5'
+                                }`}
+                              >
+                                <span className="mb-1 block text-xs font-semibold">
+                                  {t.title}
                                 </span>
-                              )}
-                            </span>
+                                <span className="block opacity-90">
+                                  {formatDay(t.start)} → {formatDay(t.end)} ·{' '}
+                                  {workdayCount(t.start, t.end, satWorks, holidaySet)}{' '}
+                                  días lab.
+                                </span>
+                                <span className="block opacity-90">
+                                  Estado: {STATUS_META[t.status].label} · Prioridad:{' '}
+                                  {prio?.name ?? '—'} · Progreso: {t.progress}%
+                                </span>
+                                <span className="block opacity-90">
+                                  Cuadrillas:{' '}
+                                  {t.groupIds
+                                    .map((id) => groupNameById.get(id) ?? '?')
+                                    .join(', ') || '—'}
+                                </span>
+                                {t.description && (
+                                  <span className="mt-1 block opacity-80">
+                                    {t.description}
+                                  </span>
+                                )}
+                              </span>
+                            )}
                           </button>
                         )
                       })}
@@ -551,6 +716,29 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                   className="pointer-events-none absolute top-0 bottom-0 z-[5] w-0.5 bg-rose-500/70"
                   style={{ left: LEFT_W + (todayIdx + 0.5) * dw - 1 }}
                 />
+              )}
+
+              {drag && drag.moved && dragPreview && (
+                <div
+                  className="pointer-events-none fixed z-[70] rounded-lg bg-slate-900/95 px-3 py-2 text-xs leading-snug text-white shadow-xl"
+                  style={{ left: drag.clientX + 14, top: drag.clientY + 14 }}
+                >
+                  <div className="font-semibold">
+                    {formatDay(dragPreview.start)} → {formatDay(dragPreview.end)}
+                  </div>
+                  <div className="opacity-80">
+                    {drag.mode === 'move'
+                      ? 'Mover tarea'
+                      : drag.mode === 'resize-l'
+                        ? 'Ajustar inicio'
+                        : 'Ajustar fin'}
+                    {drag.delta !== 0 &&
+                      ` · ${drag.delta > 0 ? '+' : ''}${drag.delta} día${
+                        Math.abs(drag.delta) === 1 ? '' : 's'
+                      }`}
+                    {' · soltá para guardar, Esc cancela'}
+                  </div>
+                </div>
               )}
             </div>
           </div>

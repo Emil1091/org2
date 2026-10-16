@@ -22,6 +22,8 @@ npm run preview
 ## Funcionalidades
 
 - **Cronograma**: una fila por cuadrilla, barras por tarea con inicio y fin estimado.
+  - **Drag & drop**: arrastrá una barra para moverla en el tiempo, o usá los bordes para
+    estirar/acortar. Mientras arrastrás se ve la fecha resultante; `Esc` cancela.
   - Zoom: **Día / Semana / Mes** (ancho de columna).
   - Rango: **Semana / 3 semanas / Mes completo**, con navegación ◀ ▶ y botón **Hoy**.
   - Fines de semana sombreados, feriados rayados y línea roja en el día de hoy.
@@ -46,9 +48,9 @@ src/
   types.ts      modelo de datos
 ```
 
-## Próxima versión (v0.1+)
+## Próxima versión (v0.2+)
 
-- Arrastrar/resize de barras (drag & drop).
 - Backend multiusuario con autenticación y permisos.
 - Dependencias entre tareas (proyectar la siguiente).
 - Vista móvil / PWA.
+- Historial de cambios y comentarios.

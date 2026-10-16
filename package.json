@@ -1,6 +1,6 @@
 {
   "name": "org-cuadrillas",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Planificador de tareas por cuadrillas (Gantt)",
   "main": "index.js",
   "scripts": {
