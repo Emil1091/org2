@@ -56,6 +56,7 @@ type DragMode = 'move' | 'resize-l' | 'resize-r'
 interface DragState {
   taskId: string
   mode: DragMode
+  fromRowId: string
   startX: number
   startY: number
   origStart: string
@@ -64,6 +65,24 @@ interface DragState {
   moved: boolean
   clientX: number
   clientY: number
+  hoverRowId?: string
+}
+
+/** Id de la fila (cuadrilla o "Pendientes") cuyo rect contiene `clientY`. */
+function findRowAt(rowEls: Map<string, HTMLDivElement>, clientY: number): string | undefined {
+  for (const [id, el] of rowEls) {
+    const r = el.getBoundingClientRect()
+    if (clientY >= r.top && clientY <= r.bottom) return id
+  }
+  return undefined
+}
+
+/** Nuevo `groupIds` al mover una tarea de la fila `from` a la fila `to`. */
+function reassignRow(groupIds: string[], from: string, to: string): string[] {
+  if (from === to) return groupIds
+  const withoutFrom = from === UNASSIGNED_ID ? groupIds : groupIds.filter((id) => id !== from)
+  if (to === UNASSIGNED_ID) return withoutFrom
+  return withoutFrom.includes(to) ? withoutFrom : [...withoutFrom, to]
 }
 
 /** Fechas resultantes de arrastrar `delta` días según el modo. */
@@ -271,6 +290,7 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
   const [drag, setDrag] = useState<DragState | null>(null)
   const dragRef = useRef<DragState | null>(null)
   const suppressClickRef = useRef(false)
+  const rowElsRef = useRef<Map<string, HTMLDivElement>>(new Map())
   const dragging = drag !== null
 
   useEffect(() => {
@@ -282,12 +302,16 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
     const onMove = (e: PointerEvent) => {
       setDrag((d) => {
         if (!d) return d
+        const hoverRowId =
+          d.mode === 'move' ? findRowAt(rowElsRef.current, e.clientY) : undefined
         return {
           ...d,
           delta: Math.round((e.clientX - d.startX) / dw),
-          moved: d.moved || Math.abs(e.clientX - d.startX) > 3,
+          moved:
+            d.moved || Math.abs(e.clientX - d.startX) > 3 || Math.abs(e.clientY - d.startY) > 3,
           clientX: e.clientX,
           clientY: e.clientY,
+          hoverRowId,
         }
       })
     }
@@ -296,15 +320,27 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
       dragRef.current = null
       setDrag(null)
       if (!d) return
-      const moved = Math.abs(e.clientX - d.startX) > 3
+      const moved = Math.abs(e.clientX - d.startX) > 3 || Math.abs(e.clientY - d.startY) > 3
       suppressClickRef.current = moved
       if (!moved) return
+      const patch: Partial<Omit<Task, 'id'>> = {}
       const delta = Math.round((e.clientX - d.startX) / dw)
-      if (delta === 0) return
-      const { start, end } = applyDelta(d, delta)
-      if (start !== d.origStart || end !== d.origEnd) {
-        updateTask(d.taskId, { start, end })
+      if (delta !== 0) {
+        const { start, end } = applyDelta(d, delta)
+        if (start !== d.origStart || end !== d.origEnd) {
+          patch.start = start
+          patch.end = end
+        }
       }
+      if (d.mode === 'move') {
+        const hoverRowId = findRowAt(rowElsRef.current, e.clientY)
+        const task = tasks.find((x) => x.id === d.taskId)
+        if (hoverRowId && task) {
+          const nextGroupIds = reassignRow(task.groupIds, d.fromRowId, hoverRowId)
+          if (nextGroupIds !== task.groupIds) patch.groupIds = nextGroupIds
+        }
+      }
+      if (Object.keys(patch).length > 0) updateTask(d.taskId, patch)
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -325,12 +361,13 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
       window.removeEventListener('keydown', onKey)
       document.body.classList.remove('select-none')
     }
-  }, [dragging, dw, updateTask])
+  }, [dragging, dw, updateTask, tasks])
 
   const startDrag = (
     e: RPointerEvent<HTMLElement>,
     taskId: string,
     mode: DragMode,
+    fromRowId: string,
   ) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return
     e.preventDefault()
@@ -340,6 +377,7 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
     const d: DragState = {
       taskId,
       mode,
+      fromRowId,
       startX: e.clientX,
       startY: e.clientY,
       origStart: t.start,
@@ -549,12 +587,18 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                 )
                 const { placed, lanes } = buildPlaced(rowTasks, viewStart, span)
                 const rowH = lanes * LANE_H + ROW_PAD * 2
+                const isDropTarget =
+                  drag?.mode === 'move' && drag.hoverRowId === g.id && drag.fromRowId !== g.id
                 return (
                   <div
                     key={g.id}
+                    ref={(el) => {
+                      if (el) rowElsRef.current.set(g.id, el)
+                      else rowElsRef.current.delete(g.id)
+                    }}
                     className={`group/row flex border-b ${
                       isUnassigned ? 'border-slate-200 border-dashed bg-slate-50/60' : 'border-slate-200'
-                    }`}
+                    } ${isDropTarget ? 'bg-blue-50 ring-2 ring-inset ring-blue-300' : ''}`}
                     style={{ height: rowH }}
                   >
                     <div
@@ -661,7 +705,7 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                               }
                               onOpenTask(t.id)
                             }}
-                            onPointerDown={(e) => startDrag(e, t.id, 'move')}
+                            onPointerDown={(e) => startDrag(e, t.id, 'move', g.id)}
                             className={`group/bar absolute z-10 flex cursor-grab touch-none items-center gap-1 px-1.5 text-left shadow-sm ring-1 ring-black/10 select-none ${
                               isDragging
                                 ? 'z-20 cursor-grabbing shadow-lg brightness-105 ring-2 ring-slate-700/50'
@@ -687,13 +731,13 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                                 <span
                                   className="absolute inset-y-0 left-0 z-20 w-1.5 cursor-ew-resize rounded-l-md bg-white/60 opacity-0 group-hover/bar:opacity-100"
                                   title="Arrastrar para cambiar el inicio"
-                                  onPointerDown={(e) => startDrag(e, t.id, 'resize-l')}
+                                  onPointerDown={(e) => startDrag(e, t.id, 'resize-l', g.id)}
                                   onClick={(e) => e.stopPropagation()}
                                 />
                                 <span
                                   className="absolute inset-y-0 right-0 z-20 w-1.5 cursor-ew-resize rounded-r-md bg-white/60 opacity-0 group-hover/bar:opacity-100"
                                   title="Arrastrar para cambiar el fin"
-                                  onPointerDown={(e) => startDrag(e, t.id, 'resize-r')}
+                                  onPointerDown={(e) => startDrag(e, t.id, 'resize-r', g.id)}
                                   onClick={(e) => e.stopPropagation()}
                                 />
                               </>
