@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useStore } from '../store/useStore'
 import { STATUS_META, STATUS_ORDER, type Task, type TaskStatus } from '../types'
-import { addDaysISO, todayISO, workdayCount } from '../lib/dates'
+import { addDaysISO, diffDays, formatDay, todayISO, workdayCount } from '../lib/dates'
+import { hasDependencyConflict, wouldCreateCycle } from '../lib/dependencies'
 import { Field, Modal, btnDanger, btnPrimary, btnSecondary, inputCls } from './Modal'
 
 interface Props {
@@ -12,6 +13,7 @@ interface Props {
 
 export function TaskModal({ taskId, onClose }: Props) {
   const task = useStore((s) => (taskId ? s.tasks.find((t) => t.id === taskId) : undefined))
+  const tasks = useStore((s) => s.tasks)
   const groups = useStore((s) => s.groups)
   const priorities = useStore((s) => s.priorities)
   const holidays = useStore((s) => s.settings.holidays)
@@ -36,17 +38,46 @@ export function TaskModal({ taskId, onClose }: Props) {
       groupIds: [] as string[],
       progress: 0,
       notes: '',
+      offDays: [] as string[],
+      dependsOn: [] as string[],
     } satisfies Task
   })
 
+  const [newOffDay, setNewOffDay] = useState('')
+
   const set = (patch: Partial<Task>) => setForm((f) => ({ ...f, ...patch }))
 
-  const holidaySet = new Set(holidays)
+  const offDays = [...(form.offDays ?? [])].sort()
+  const holidaySet = new Set([...holidays, ...offDays])
   const saturdayWorks =
     form.groupIds.length === 0
       ? true
       : form.groupIds.some((id) => groups.find((g) => g.id === id)?.worksSaturday)
   const duration = workdayCount(form.start, form.end, saturdayWorks, holidaySet)
+
+  const otherTasks = tasks.filter((t) => t.id !== form.id)
+  const toggleDependency = (depId: string) => {
+    const has = (form.dependsOn ?? []).includes(depId)
+    const next = has
+      ? (form.dependsOn ?? []).filter((x) => x !== depId)
+      : [...(form.dependsOn ?? []), depId]
+    if (!has && wouldCreateCycle(tasks, form.id || '__nueva__', next)) {
+      alert('Esa dependencia generaría un ciclo: una tarea no puede depender, directa o indirectamente, de sí misma.')
+      return
+    }
+    // Al agregar una dependencia, esta tarea empieza después de que la otra termine, no antes.
+    if (!has) {
+      const dep = tasks.find((t) => t.id === depId)
+      if (dep && dep.end >= form.start) {
+        const start = addDaysISO(dep.end, 1)
+        const deltaDays = diffDays(form.start, start)
+        set({ dependsOn: next, start, end: addDaysISO(form.end, deltaDays) })
+        return
+      }
+    }
+    set({ dependsOn: next })
+  }
+  const dependencyConflict = hasDependencyConflict(tasks, form)
 
   const save = () => {
     if (!form.title.trim()) {
@@ -54,7 +85,13 @@ export function TaskModal({ taskId, onClose }: Props) {
       return
     }
     const end = form.end < form.start ? form.start : form.end
-    const payload = { ...form, title: form.title.trim(), end }
+    const start = form.start
+    const payload = {
+      ...form,
+      title: form.title.trim(),
+      end,
+      offDays: (form.offDays ?? []).filter((d) => d >= start && d <= end),
+    }
     if (taskId) {
       updateTask(taskId, payload)
     } else {
@@ -135,7 +172,58 @@ export function TaskModal({ taskId, onClose }: Props) {
           Duración: <strong>{duration}</strong> día{duration === 1 ? '' : 's'} laborable
           {duration === 1 ? '' : 's'} (domingos excluidos
           {saturdayWorks ? ', sábados incluidos' : ', sábados excluidos'}; feriados
+          {offDays.length > 0 ? ' y días sin trabajar ' : ' '}
           excluidos).
+        </div>
+
+        <div className="sm:col-span-2">
+          <Field
+            label="Días sin trabajar"
+            hint="Quedan dentro del rango de la tarea, pero no cuentan como días laborables."
+          >
+            <div className="flex gap-2">
+              <input
+                type="date"
+                className={`${inputCls} max-w-52`}
+                value={newOffDay}
+                min={form.start}
+                max={form.end}
+                onChange={(e) => setNewOffDay(e.target.value)}
+              />
+              <button
+                className={btnSecondary}
+                onClick={() => {
+                  if (!newOffDay || offDays.includes(newOffDay)) return
+                  if (newOffDay < form.start || newOffDay > form.end) return
+                  set({ offDays: [...(form.offDays ?? []), newOffDay] })
+                  setNewOffDay('')
+                }}
+              >
+                + Agregar
+              </button>
+            </div>
+            {offDays.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {offDays.map((d) => (
+                  <span
+                    key={d}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600"
+                  >
+                    {formatDay(d)}
+                    <button
+                      className="text-slate-400 hover:text-slate-700"
+                      onClick={() =>
+                        set({ offDays: (form.offDays ?? []).filter((x) => x !== d) })
+                      }
+                      aria-label={`Quitar día sin trabajar ${d}`}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </Field>
         </div>
 
         <Field label="Estado">
@@ -209,6 +297,41 @@ export function TaskModal({ taskId, onClose }: Props) {
                   </label>
                 ))}
               </div>
+            )}
+          </Field>
+        </div>
+
+        <div className="sm:col-span-2">
+          <Field
+            label="Depende de"
+            hint="Esta tarea no puede empezar hasta que las elegidas terminen. Si alguna se atrasa, esta se reprograma sola."
+          >
+            {otherTasks.length === 0 ? (
+              <p className="text-sm text-slate-500">No hay otras tareas todavía.</p>
+            ) : (
+              <div className="grid max-h-40 gap-1.5 overflow-y-auto sm:grid-cols-2">
+                {otherTasks.map((t) => (
+                  <label
+                    key={t.id}
+                    className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={(form.dependsOn ?? []).includes(t.id)}
+                      onChange={() => toggleDependency(t.id)}
+                    />
+                    <span className="min-w-0 flex-1 truncate">{t.title}</span>
+                    <span className="shrink-0 text-[10px] text-slate-400">
+                      {formatDay(t.end)}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+            {dependencyConflict && (
+              <p className="mt-2 text-xs font-medium text-amber-600">
+                ⚠ El inicio de esta tarea es antes de que termine alguna de las que depende.
+              </p>
             )}
           </Field>
         </div>

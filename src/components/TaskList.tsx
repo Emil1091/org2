@@ -18,9 +18,10 @@ type SortKey =
 interface Props {
   onOpenTask: (id: string) => void
   onNewTask: () => void
+  onHoverTask?: (id: string | null) => void
 }
 
-export function TaskList({ onOpenTask, onNewTask }: Props) {
+export function TaskList({ onOpenTask, onNewTask, onHoverTask }: Props) {
   const tasks = useStore((s) => s.tasks)
   const groups = useStore((s) => s.groups)
   const priorities = useStore((s) => s.priorities)
@@ -39,7 +40,7 @@ export function TaskList({ onOpenTask, onNewTask }: Props) {
       : t.groupIds.some((id) => gmap.get(id)?.worksSaturday)
 
   const duration = (t: Task) =>
-    workdayCount(t.start, t.end, satWorks(t), hset)
+    workdayCount(t.start, t.end, satWorks(t), new Set([...hset, ...(t.offDays ?? [])]))
 
   const sorted = useMemo(() => {
     const val = (t: Task): string | number => {
@@ -145,6 +146,8 @@ export function TaskList({ onOpenTask, onNewTask }: Props) {
                     key={t.id}
                     className="cursor-pointer border-b border-slate-100 hover:bg-slate-50"
                     onClick={() => onOpenTask(t.id)}
+                    onMouseEnter={() => onHoverTask?.(t.id)}
+                    onMouseLeave={() => onHoverTask?.(null)}
                   >
                     <td className="max-w-72 px-3 py-2">
                       <div className="truncate font-medium text-slate-800" title={t.title}>

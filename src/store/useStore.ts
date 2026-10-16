@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { AppData, Group, PriorityLevel, Settings, Task } from '../types'
-import { addDaysISO, todayISO } from '../lib/dates'
+import { addDaysISO, diffDays, todayISO } from '../lib/dates'
 
 const uid = (): string =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -214,12 +214,53 @@ export const useStore = create<AppStore>()(
         set((s) => ({ tasks: [...s.tasks, { ...t, id: uid() }] })),
 
       updateTask: (id, patch) =>
-        set((s) => ({
-          tasks: s.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)),
-        })),
+        set((s) => {
+          const prev = s.tasks.find((t) => t.id === id)
+          let tasks = s.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t))
+
+          // Si se movió la fecha de fin, reprograma en cascada a todo lo que depende de esta tarea.
+          if (prev && patch.end !== undefined && patch.end !== prev.end) {
+            const deltaDays = diffDays(prev.end, patch.end)
+            if (deltaDays !== 0) {
+              const shifted = new Set<string>([id])
+              const queue = [id]
+              while (queue.length) {
+                const cur = queue.shift()!
+                const dependents = tasks.filter(
+                  (t) => !shifted.has(t.id) && t.dependsOn?.includes(cur),
+                )
+                for (const d of dependents) {
+                  shifted.add(d.id)
+                  queue.push(d.id)
+                }
+                if (dependents.length) {
+                  const ids = new Set(dependents.map((d) => d.id))
+                  tasks = tasks.map((t) =>
+                    ids.has(t.id)
+                      ? {
+                          ...t,
+                          start: addDaysISO(t.start, deltaDays),
+                          end: addDaysISO(t.end, deltaDays),
+                        }
+                      : t,
+                  )
+                }
+              }
+            }
+          }
+
+          return { tasks }
+        }),
 
       removeTask: (id) =>
-        set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) })),
+        set((s) => ({
+          tasks: s.tasks
+            .filter((t) => t.id !== id)
+            .map((t) => ({
+              ...t,
+              dependsOn: t.dependsOn?.filter((x) => x !== id),
+            })),
+        })),
 
       addPriority: (p) =>
         set((s) => ({
@@ -281,6 +322,8 @@ export const useStore = create<AppStore>()(
             ...t,
             priorityId: valid.has(t.priorityId) ? t.priorityId : priorities[0].id,
             groupIds: Array.isArray(t.groupIds) ? t.groupIds : [],
+            offDays: Array.isArray(t.offDays) ? t.offDays : [],
+            dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn : [],
           })),
           priorities,
           settings: {

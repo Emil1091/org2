@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { TopBar } from './components/TopBar'
 import { Cronograma } from './components/Cronograma'
 import { TaskList } from './components/TaskList'
@@ -6,13 +6,18 @@ import { TaskModal } from './components/TaskModal'
 import { GroupModal } from './components/GroupModal'
 import { LegendModal } from './components/LegendModal'
 import { SettingsModal } from './components/SettingsModal'
+import { AlertsPanel } from './components/AlertsPanel'
 import { SplitHandle } from './components/SplitHandle'
+import { useStore } from './store/useStore'
+import { computeAlerts } from './lib/alerts'
+import { todayISO } from './lib/dates'
 
 type ModalState =
   | { type: 'task'; id?: string }
   | { type: 'group'; id?: string }
   | { type: 'legend' }
   | { type: 'settings' }
+  | { type: 'alerts' }
   | null
 
 const SPLIT_KEY = 'gantt-split-ratio'
@@ -37,8 +42,20 @@ export default function App() {
   const [modal, setModal] = useState<ModalState>(null)
   const [splitRatio, setSplitRatio] = useState(readSplitRatio)
   const [resizing, setResizing] = useState(false)
+  const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null)
   const mainRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ startY: number; startRatio: number; containerH: number } | null>(null)
+
+  const tasks = useStore((s) => s.tasks)
+  const groups = useStore((s) => s.groups)
+  const holidays = useStore((s) => s.settings.holidays)
+  const overdueCount = useMemo(
+    () =>
+      computeAlerts(tasks, groups, new Set(holidays), todayISO()).filter(
+        (a) => a.kind === 'overdue',
+      ).length,
+    [tasks, groups, holidays],
+  )
 
   useEffect(() => {
     if (!resizing) return
@@ -88,7 +105,23 @@ export default function App() {
         onNewGroup={() => setModal({ type: 'group' })}
         onOpenLegend={() => setModal({ type: 'legend' })}
         onOpenSettings={() => setModal({ type: 'settings' })}
+        onOpenAlerts={() => setModal({ type: 'alerts' })}
       />
+
+      {overdueCount > 0 && (
+        <div className="flex shrink-0 items-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          <span>
+            ⚠ Tenés <strong>{overdueCount}</strong> tarea{overdueCount === 1 ? '' : 's'} vencida
+            {overdueCount === 1 ? '' : 's'}: ¿están terminadas o necesitan más plazo?
+          </span>
+          <button
+            className="ml-auto shrink-0 rounded-md border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100"
+            onClick={() => setModal({ type: 'alerts' })}
+          >
+            Revisar
+          </button>
+        </div>
+      )}
 
       <main ref={mainRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
         <div
@@ -98,6 +131,7 @@ export default function App() {
             onOpenTask={(id) => setModal({ type: 'task', id })}
             onNewGroup={() => setModal({ type: 'group' })}
             onEditGroup={(id) => setModal({ type: 'group', id })}
+            hoveredTaskId={hoveredTaskId}
           />
         </div>
 
@@ -115,6 +149,7 @@ export default function App() {
           <TaskList
             onOpenTask={(id) => setModal({ type: 'task', id })}
             onNewTask={() => setModal({ type: 'task' })}
+            onHoverTask={setHoveredTaskId}
           />
         </div>
       </main>
@@ -127,6 +162,12 @@ export default function App() {
       )}
       {modal?.type === 'legend' && <LegendModal onClose={() => setModal(null)} />}
       {modal?.type === 'settings' && <SettingsModal onClose={() => setModal(null)} />}
+      {modal?.type === 'alerts' && (
+        <AlertsPanel
+          onOpenTask={(id) => setModal({ type: 'task', id })}
+          onClose={() => setModal(null)}
+        />
+      )}
     </div>
   )
 }

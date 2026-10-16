@@ -1,6 +1,8 @@
-import { useRef } from 'react'
+import { useMemo, useRef } from 'react'
 import { useStore } from '../store/useStore'
 import { exportJSON, parseImport } from '../lib/exportImport'
+import { computeAlerts } from '../lib/alerts'
+import { todayISO } from '../lib/dates'
 import { btnPrimary, btnSecondary } from './Modal'
 
 interface Props {
@@ -8,12 +10,27 @@ interface Props {
   onNewGroup: () => void
   onOpenLegend: () => void
   onOpenSettings: () => void
+  onOpenAlerts: () => void
 }
 
-export function TopBar({ onNewTask, onNewGroup, onOpenLegend, onOpenSettings }: Props) {
+export function TopBar({
+  onNewTask,
+  onNewGroup,
+  onOpenLegend,
+  onOpenSettings,
+  onOpenAlerts,
+}: Props) {
   const getData = useStore((s) => s.getData)
   const importData = useStore((s) => s.importData)
+  const tasks = useStore((s) => s.tasks)
+  const groups = useStore((s) => s.groups)
+  const holidays = useStore((s) => s.settings.holidays)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const alertCount = useMemo(
+    () => computeAlerts(tasks, groups, new Set(holidays), todayISO()).length,
+    [tasks, groups, holidays],
+  )
 
   const onImportFile = async (file: File | undefined) => {
     if (!file) return
@@ -43,6 +60,18 @@ export function TopBar({ onNewTask, onNewGroup, onOpenLegend, onOpenSettings }: 
         </div>
       </div>
 
+      <button
+        className={`${btnSecondary} relative`}
+        onClick={onOpenAlerts}
+        title="Tareas vencidas, sin iniciar o de larga duración"
+      >
+        ⚠ Alertas
+        {alertCount > 0 && (
+          <span className="absolute -top-1.5 -right-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-semibold text-white">
+            {alertCount}
+          </span>
+        )}
+      </button>
       <button className={btnSecondary} onClick={onOpenLegend} title="Prioridades y estados">
         🎨 Leyenda
       </button>

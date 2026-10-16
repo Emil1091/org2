@@ -37,6 +37,10 @@ export interface Task {
   /** 0..100 */
   progress: number
   notes: string
+  /** Días puntuales dentro de [start, end] en los que no se trabajó ('YYYY-MM-DD') */
+  offDays?: string[]
+  /** Ids de tareas que deben finalizar antes de que esta pueda empezar. */
+  dependsOn?: string[]
 }
 
 export type ColorSource = 'priority' | 'status'

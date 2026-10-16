@@ -85,7 +85,7 @@ export function exportTasksCSV(
       t.groupIds.map((id) => gmap.get(id)?.name ?? '').join(' + '),
       formatDay(t.start),
       formatDay(t.end),
-      workdayCount(t.start, t.end, sat, hset),
+      workdayCount(t.start, t.end, sat, new Set([...hset, ...(t.offDays ?? [])])),
       STATUS_META[t.status].label,
       pmap.get(t.priorityId)?.name ?? '',
       t.progress,

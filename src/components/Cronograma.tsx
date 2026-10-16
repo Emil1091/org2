@@ -21,6 +21,7 @@ import {
   workdayCount,
 } from '../lib/dates'
 import { contrastText } from '../lib/colors'
+import { directDependents, hasDependencyConflict } from '../lib/dependencies'
 import { btnPrimary } from './Modal'
 
 type Zoom = 'day' | 'week' | 'month'
@@ -192,9 +193,10 @@ interface Props {
   onOpenTask: (id: string) => void
   onNewGroup: () => void
   onEditGroup: (id: string) => void
+  hoveredTaskId?: string | null
 }
 
-export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
+export function Cronograma({ onOpenTask, onNewGroup, onEditGroup, hoveredTaskId }: Props) {
   const groups = useStore((s) => s.groups)
   const tasks = useStore((s) => s.tasks)
   const priorities = useStore((s) => s.priorities)
@@ -285,6 +287,15 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
 
   const todayIdx = diffDays(viewStart, today)
   const todayInRange = todayIdx >= 0 && todayIdx < span
+
+  const hoveredTask = hoveredTaskId ? tasks.find((t) => t.id === hoveredTaskId) : undefined
+  const hoveredSpan =
+    hoveredTask && hoveredTask.start <= viewEnd && hoveredTask.end >= viewStart
+      ? {
+          s: Math.max(diffDays(viewStart, hoveredTask.start), 0),
+          e: Math.min(diffDays(viewStart, hoveredTask.end), span - 1),
+        }
+      : null
 
   // ---- Drag & drop de barras ----
   const [drag, setDrag] = useState<DragState | null>(null)
@@ -577,6 +588,16 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                 />
               ))}
 
+              {hoveredSpan && (
+                <div
+                  className="pointer-events-none absolute top-0 bottom-0 z-0 bg-sky-400/15"
+                  style={{
+                    left: LEFT_W + hoveredSpan.s * dw,
+                    width: (hoveredSpan.e - hoveredSpan.s + 1) * dw,
+                  }}
+                />
+              )}
+
               {ganttRows.map((g, rowIdx) => {
                 const isUnassigned = g.id === UNASSIGNED_ID
                 const rowTasks = tasks.filter(
@@ -589,6 +610,11 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                 const rowH = lanes * LANE_H + ROW_PAD * 2
                 const isDropTarget =
                   drag?.mode === 'move' && drag.hoverRowId === g.id && drag.fromRowId !== g.id
+                const isHoverRow =
+                  !!hoveredTask &&
+                  (isUnassigned
+                    ? hoveredTask.groupIds.length === 0
+                    : hoveredTask.groupIds.includes(g.id))
                 return (
                   <div
                     key={g.id}
@@ -598,7 +624,9 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                     }}
                     className={`group/row flex border-b ${
                       isUnassigned ? 'border-slate-200 border-dashed bg-slate-50/60' : 'border-slate-200'
-                    } ${isDropTarget ? 'bg-blue-50 ring-2 ring-inset ring-blue-300' : ''}`}
+                    } ${isDropTarget ? 'bg-blue-50 ring-2 ring-inset ring-blue-300' : ''} ${
+                      isHoverRow ? 'bg-sky-50/70' : ''
+                    }`}
                     style={{ height: rowH }}
                   >
                     <div
@@ -695,6 +723,9 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                               )
                         const tooltipRight = sIdx > span * 0.5
                         const tooltipBelow = rowIdx === 0 && lane === 0
+                        const isHoverBar = t.id === hoveredTaskId
+                        const dependents = directDependents(tasks, t.id)
+                        const hasConflict = hasDependencyConflict(tasks, t)
                         return (
                           <button
                             key={g.id + t.id}
@@ -712,7 +743,13 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                                 : 'hover:z-30 hover:brightness-105'
                             } ${clippedL ? 'rounded-l-none' : 'rounded-md'} ${
                               clippedR ? 'rounded-r-none' : 'rounded-md'
-                            } ${t.status === 'completada' ? 'opacity-75' : ''}`}
+                            } ${t.status === 'completada' ? 'opacity-75' : ''} ${
+                              isHoverBar
+                                ? 'z-30 ring-2 ring-sky-500 brightness-105'
+                                : hasConflict
+                                  ? 'ring-2 ring-amber-500'
+                                  : ''
+                            }`}
                             style={{
                               left,
                               top,
@@ -726,6 +763,24 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                               className="absolute inset-y-0 left-0 rounded-[inherit] bg-black/20"
                               style={{ width: `${t.progress}%` }}
                             />
+                            {(t.offDays ?? [])
+                              .filter((d) => {
+                                const idx = diffDays(viewStart, d)
+                                return idx >= visS && idx <= visE
+                              })
+                              .map((d) => (
+                                <span
+                                  key={d}
+                                  className="pointer-events-none absolute inset-y-0"
+                                  style={{
+                                    left: (diffDays(viewStart, d) - visS) * dw,
+                                    width: dw,
+                                    backgroundImage:
+                                      'repeating-linear-gradient(45deg, rgba(255,255,255,0.4) 0 4px, rgba(255,255,255,0.1) 4px 8px)',
+                                  }}
+                                  title={`Sin trabajo el ${formatDay(d)}`}
+                                />
+                              ))}
                             {width > 20 && (
                               <>
                                 <span
@@ -748,6 +803,11 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                             <span className="relative z-10 min-w-0 flex-1 truncate text-[11px] font-medium">
                               {t.title}
                             </span>
+                            {((t.dependsOn?.length ?? 0) > 0 || dependents.length > 0) && (
+                              <span className="relative z-10 shrink-0 text-[10px] opacity-90">
+                                🔗
+                              </span>
+                            )}
 
                             {!isDragging && (
                               <span
@@ -764,7 +824,12 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                                 </span>
                                 <span className="block opacity-90">
                                   {formatDay(t.start)} → {formatDay(t.end)} ·{' '}
-                                  {workdayCount(t.start, t.end, satWorks, holidaySet)}{' '}
+                                  {workdayCount(
+                                    t.start,
+                                    t.end,
+                                    satWorks,
+                                    new Set([...holidaySet, ...(t.offDays ?? [])]),
+                                  )}{' '}
                                   días lab.
                                 </span>
                                 <span className="block opacity-90">
@@ -780,6 +845,24 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                                 {t.description && (
                                   <span className="mt-1 block opacity-80">
                                     {t.description}
+                                  </span>
+                                )}
+                                {(t.dependsOn?.length ?? 0) > 0 && (
+                                  <span className="mt-1 block opacity-90">
+                                    Depende de:{' '}
+                                    {t.dependsOn!
+                                      .map((id) => tasks.find((x) => x.id === id)?.title ?? '?')
+                                      .join(', ')}
+                                  </span>
+                                )}
+                                {dependents.length > 0 && (
+                                  <span className="block opacity-90">
+                                    Bloquea a: {dependents.map((d) => d.title).join(', ')}
+                                  </span>
+                                )}
+                                {hasConflict && (
+                                  <span className="mt-1 block font-medium text-amber-300">
+                                    ⚠ Empieza antes de que termine alguna de sus dependencias
                                   </span>
                                 )}
                               </span>
