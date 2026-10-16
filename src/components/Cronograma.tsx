@@ -525,7 +525,7 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                 />
               ))}
 
-              {sortedGroups.map((g) => {
+              {sortedGroups.map((g, rowIdx) => {
                 const rowTasks = tasks.filter(
                   (t) =>
                     t.groupIds.includes(g.id) && t.start <= viewEnd && t.end >= viewStart,
@@ -613,7 +613,7 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                           (id) => groups.find((x) => x.id === id)?.worksSaturday,
                         )
                         const tooltipRight = sIdx > span * 0.5
-                        const tooltipBelow = lane === 0 && top < 40
+                        const tooltipBelow = rowIdx === 0 && lane === 0
                         return (
                           <button
                             key={g.id + t.id}
@@ -628,7 +628,7 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                             className={`group/bar absolute z-10 flex cursor-grab touch-none items-center gap-1 px-1.5 text-left shadow-sm ring-1 ring-black/10 select-none ${
                               isDragging
                                 ? 'z-20 cursor-grabbing shadow-lg brightness-105 ring-2 ring-slate-700/50'
-                                : 'hover:brightness-105'
+                                : 'hover:z-30 hover:brightness-105'
                             } ${clippedL ? 'rounded-l-none' : 'rounded-md'} ${
                               clippedR ? 'rounded-r-none' : 'rounded-md'
                             } ${t.status === 'completada' ? 'opacity-75' : ''}`}
