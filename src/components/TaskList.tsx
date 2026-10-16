@@ -93,7 +93,7 @@ export function TaskList({ onOpenTask, onNewTask }: Props) {
   )
 
   return (
-    <section className="flex max-h-[40vh] min-h-[150px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
         <h2 className="text-sm font-semibold text-slate-800">
           Tareas ({tasks.length})

@@ -31,6 +31,7 @@ const LEFT_W = 232
 const ROW_PAD = 8
 const LANE_H = 32
 const BAR_H = 24
+const UNASSIGNED_ID = '__unassigned__'
 
 interface Segment {
   key: string
@@ -202,6 +203,19 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
     () => [...groups].sort((a, b) => a.order - b.order),
     [groups],
   )
+  const ganttRows = useMemo(
+    () => [
+      ...sortedGroups,
+      {
+        id: UNASSIGNED_ID,
+        name: 'Pendientes',
+        color: '#94a3b8',
+        worksSaturday: true,
+        order: sortedGroups.length,
+      },
+    ],
+    [sortedGroups],
+  )
   const priorityById = useMemo(
     () => new Map(priorities.map((p) => [p.id, p])),
     [priorities],
@@ -359,7 +373,7 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
     }`
 
   return (
-    <section className="flex min-h-[320px] flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <section className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-slate-200 px-3 py-2">
         <h2 className="text-sm font-semibold text-slate-800">Cronograma</h2>
         <span className="text-xs text-slate-500">
@@ -525,17 +539,22 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                 />
               ))}
 
-              {sortedGroups.map((g, rowIdx) => {
+              {ganttRows.map((g, rowIdx) => {
+                const isUnassigned = g.id === UNASSIGNED_ID
                 const rowTasks = tasks.filter(
                   (t) =>
-                    t.groupIds.includes(g.id) && t.start <= viewEnd && t.end >= viewStart,
+                    (isUnassigned ? t.groupIds.length === 0 : t.groupIds.includes(g.id)) &&
+                    t.start <= viewEnd &&
+                    t.end >= viewStart,
                 )
                 const { placed, lanes } = buildPlaced(rowTasks, viewStart, span)
                 const rowH = lanes * LANE_H + ROW_PAD * 2
                 return (
                   <div
                     key={g.id}
-                    className="group/row flex border-b border-slate-200"
+                    className={`group/row flex border-b ${
+                      isUnassigned ? 'border-slate-200 border-dashed bg-slate-50/60' : 'border-slate-200'
+                    }`}
                     style={{ height: rowH }}
                   >
                     <div
@@ -546,13 +565,22 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                         className="h-3 w-3 shrink-0 rounded-full"
                         style={{ background: g.color }}
                       />
-                      <button
-                        className="min-w-0 flex-1 truncate text-left text-sm font-medium text-slate-700 hover:text-slate-950 hover:underline"
-                        onClick={() => onEditGroup(g.id)}
-                        title={`${g.name} — clic para editar`}
-                      >
-                        {g.name}
-                      </button>
+                      {isUnassigned ? (
+                        <span
+                          className="min-w-0 flex-1 truncate text-left text-sm font-medium text-slate-500 italic"
+                          title="Tareas sin cuadrilla asignada"
+                        >
+                          {g.name}
+                        </span>
+                      ) : (
+                        <button
+                          className="min-w-0 flex-1 truncate text-left text-sm font-medium text-slate-700 hover:text-slate-950 hover:underline"
+                          onClick={() => onEditGroup(g.id)}
+                          title={`${g.name} — clic para editar`}
+                        >
+                          {g.name}
+                        </button>
+                      )}
                       {!g.worksSaturday && (
                         <span
                           className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] whitespace-nowrap text-slate-500"
@@ -563,26 +591,32 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                       )}
                       <span
                         className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500"
-                        title="Tareas asignadas en este período"
+                        title={
+                          isUnassigned
+                            ? 'Tareas sin cuadrilla en este período'
+                            : 'Tareas asignadas en este período'
+                        }
                       >
                         {rowTasks.length}
                       </span>
-                      <div className="flex shrink-0 opacity-0 transition-opacity group-hover/row:opacity-100">
-                        <button
-                          className="px-0.5 text-[10px] text-slate-400 hover:text-slate-700"
-                          onClick={() => moveGroup(g.id, -1)}
-                          title="Subir cuadrilla"
-                        >
-                          ▲
-                        </button>
-                        <button
-                          className="px-0.5 text-[10px] text-slate-400 hover:text-slate-700"
-                          onClick={() => moveGroup(g.id, 1)}
-                          title="Bajar cuadrilla"
-                        >
-                          ▼
-                        </button>
-                      </div>
+                      {!isUnassigned && (
+                        <div className="flex shrink-0 opacity-0 transition-opacity group-hover/row:opacity-100">
+                          <button
+                            className="px-0.5 text-[10px] text-slate-400 hover:text-slate-700"
+                            onClick={() => moveGroup(g.id, -1)}
+                            title="Subir cuadrilla"
+                          >
+                            ▲
+                          </button>
+                          <button
+                            className="px-0.5 text-[10px] text-slate-400 hover:text-slate-700"
+                            onClick={() => moveGroup(g.id, 1)}
+                            title="Bajar cuadrilla"
+                          >
+                            ▼
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     <div className="relative" style={{ width: totalW }}>
@@ -609,9 +643,12 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup }: Props) {
                         const top = ROW_PAD + lane * LANE_H
                         const clippedL = dispStart < viewStart
                         const clippedR = dispEnd > viewEnd
-                        const satWorks = t.groupIds.some(
-                          (id) => groups.find((x) => x.id === id)?.worksSaturday,
-                        )
+                        const satWorks =
+                          t.groupIds.length === 0
+                            ? true
+                            : t.groupIds.some(
+                                (id) => groups.find((x) => x.id === id)?.worksSaturday,
+                              )
                         const tooltipRight = sIdx > span * 0.5
                         const tooltipBelow = rowIdx === 0 && lane === 0
                         return (
