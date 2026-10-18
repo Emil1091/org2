@@ -1,7 +1,22 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
 import type { AppData, Group, PriorityLevel, Settings, Task } from '../types'
 import { addDaysISO, diffDays, todayISO } from '../lib/dates'
+import { supabase } from '../lib/supabaseClient'
+import {
+  groupToRow,
+  rowToGroup,
+  priorityToRow,
+  rowToPriority,
+  taskToRow,
+  rowToTask,
+  settingsToRow,
+  rowToSettings,
+  SETTINGS_ROW_ID,
+  type GroupRow,
+  type PriorityRow,
+  type TaskRow,
+  type SettingsRow,
+} from '../lib/db'
 
 const uid = (): string =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -140,9 +155,52 @@ const emptyData = (): AppData => ({
   settings: { colorBy: 'priority', holidays: [] },
 })
 
+// ---------- Sync remoto (Supabase) ----------
+
+async function db(label: string, q: PromiseLike<{ error: unknown }>): Promise<void> {
+  const { error } = await q
+  if (error) console.error(`[db] ${label} falló:`, error)
+}
+
+async function replaceAllRemote(data: AppData): Promise<void> {
+  await db('borrar tasks', supabase.from('tasks').delete().neq('id', ''))
+  await db('borrar groups', supabase.from('groups').delete().neq('id', ''))
+  await db('borrar priorities', supabase.from('priorities').delete().neq('id', ''))
+  if (data.priorities.length)
+    await db('insertar priorities', supabase.from('priorities').insert(data.priorities.map(priorityToRow)))
+  if (data.groups.length)
+    await db('insertar groups', supabase.from('groups').insert(data.groups.map(groupToRow)))
+  if (data.tasks.length)
+    await db('insertar tasks', supabase.from('tasks').insert(data.tasks.map(taskToRow)))
+  await db('guardar settings', supabase.from('settings').upsert(settingsToRow(data.settings)))
+}
+
+function upsertById<T extends { id: string }>(list: T[], item: T): T[] {
+  const idx = list.findIndex((x) => x.id === item.id)
+  if (idx === -1) return [...list, item]
+  const copy = [...list]
+  copy[idx] = item
+  return copy
+}
+
+function removeById<T extends { id: string }>(list: T[], id: string): T[] {
+  return list.filter((x) => x.id !== id)
+}
+
+function diffOrder<T extends { id: string; order: number }>(prev: T[], next: T[]): T[] {
+  const prevOrder = new Map(prev.map((x) => [x.id, x.order]))
+  return next.filter((x) => prevOrder.get(x.id) !== x.order)
+}
+
+let channel: ReturnType<typeof supabase.channel> | null = null
+
 // ---------- Store ----------
 
 interface AppStore extends AppData {
+  ready: boolean
+  init: () => Promise<void>
+  reset: () => void
+
   addGroup: (g: Omit<Group, 'id' | 'order'>) => void
   updateGroup: (id: string, patch: Partial<Omit<Group, 'id'>>) => void
   removeGroup: (id: string) => void
@@ -181,167 +239,313 @@ function swap<T extends { id: string; order: number }>(
   )
 }
 
-export const useStore = create<AppStore>()(
-  persist(
-    (set, get) => ({
-      ...seedData(),
+export const useStore = create<AppStore>()((set, get) => ({
+  ...emptyData(),
+  ready: false,
 
-      addGroup: (g) =>
-        set((s) => ({
-          groups: [
-            ...s.groups,
-            { ...g, id: uid(), order: s.groups.length ? Math.max(...s.groups.map((x) => x.order)) + 1 : 0 },
-          ],
-        })),
+  init: async () => {
+    if (channel) return
+    const ch = supabase.channel('db-changes')
+    channel = ch
 
-      updateGroup: (id, patch) =>
-        set((s) => ({
-          groups: s.groups.map((g) => (g.id === id ? { ...g, ...patch } : g)),
-        })),
+    const { data: sessionRes } = await supabase.auth.getSession()
+    if (sessionRes.session) {
+      await supabase.realtime.setAuth(sessionRes.session.access_token)
+    }
 
-      removeGroup: (id) =>
-        set((s) => ({
-          groups: s.groups.filter((g) => g.id !== id),
-          tasks: s.tasks.map((t) => ({
-            ...t,
-            groupIds: t.groupIds.filter((gid) => gid !== id),
-          })),
-        })),
+    ch.on<TaskRow>(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'tasks' },
+      (payload) => {
+        set((s) =>
+          payload.eventType === 'DELETE'
+            ? { tasks: removeById(s.tasks, (payload.old as TaskRow).id) }
+            : { tasks: upsertById(s.tasks, rowToTask(payload.new as TaskRow)) },
+        )
+      },
+    )
+      .on<GroupRow>(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'groups' },
+        (payload) => {
+          set((s) =>
+            payload.eventType === 'DELETE'
+              ? { groups: removeById(s.groups, (payload.old as GroupRow).id) }
+              : { groups: upsertById(s.groups, rowToGroup(payload.new as GroupRow)) },
+          )
+        },
+      )
+      .on<PriorityRow>(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'priorities' },
+        (payload) => {
+          set((s) =>
+            payload.eventType === 'DELETE'
+              ? { priorities: removeById(s.priorities, (payload.old as PriorityRow).id) }
+              : { priorities: upsertById(s.priorities, rowToPriority(payload.new as PriorityRow)) },
+          )
+        },
+      )
+      .on<SettingsRow>(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'settings' },
+        (payload) => {
+          if (payload.eventType === 'DELETE') return
+          set({ settings: rowToSettings(payload.new as SettingsRow) })
+        },
+      )
+      .subscribe((status, err) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.error('[realtime] canal con problemas:', status, err)
+        }
+      })
 
-      moveGroup: (id, dir) => set((s) => ({ groups: swap(s.groups, id, dir) })),
+    const [groupsRes, tasksRes, prioritiesRes, settingsRes] = await Promise.all([
+      supabase.from('groups').select('*'),
+      supabase.from('tasks').select('*'),
+      supabase.from('priorities').select('*'),
+      supabase.from('settings').select('*').eq('id', SETTINGS_ROW_ID).single(),
+    ])
 
-      addTask: (t) =>
-        set((s) => ({ tasks: [...s.tasks, { ...t, id: uid() }] })),
+    set({
+      groups: ((groupsRes.data as GroupRow[] | null) ?? []).map(rowToGroup),
+      tasks: ((tasksRes.data as TaskRow[] | null) ?? []).map(rowToTask),
+      priorities: ((prioritiesRes.data as PriorityRow[] | null) ?? []).map(rowToPriority),
+      settings: settingsRes.data ? rowToSettings(settingsRes.data as SettingsRow) : get().settings,
+      ready: true,
+    })
+  },
 
-      updateTask: (id, patch) =>
-        set((s) => {
-          const prev = s.tasks.find((t) => t.id === id)
-          let tasks = s.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t))
+  reset: () => {
+    if (channel) {
+      supabase.removeChannel(channel)
+      channel = null
+    }
+    set({ ...emptyData(), ready: false })
+  },
 
-          // Si se movió la fecha de fin, reprograma en cascada a todo lo que depende de esta tarea.
-          if (prev && patch.end !== undefined && patch.end !== prev.end) {
-            const deltaDays = diffDays(prev.end, patch.end)
-            if (deltaDays !== 0) {
-              const shifted = new Set<string>([id])
-              const queue = [id]
-              while (queue.length) {
-                const cur = queue.shift()!
-                const dependents = tasks.filter(
-                  (t) => !shifted.has(t.id) && t.dependsOn?.includes(cur),
-                )
-                for (const d of dependents) {
-                  shifted.add(d.id)
-                  queue.push(d.id)
-                }
-                if (dependents.length) {
-                  const ids = new Set(dependents.map((d) => d.id))
-                  tasks = tasks.map((t) =>
-                    ids.has(t.id)
-                      ? {
-                          ...t,
-                          start: addDaysISO(t.start, deltaDays),
-                          end: addDaysISO(t.end, deltaDays),
-                        }
-                      : t,
-                  )
-                }
-              }
+  addGroup: (g) => {
+    let inserted!: Group
+    set((s) => {
+      const order = s.groups.length ? Math.max(...s.groups.map((x) => x.order)) + 1 : 0
+      inserted = { ...g, id: uid(), order }
+      return { groups: [...s.groups, inserted] }
+    })
+    void db('crear grupo', supabase.from('groups').insert(groupToRow(inserted)))
+  },
+
+  updateGroup: (id, patch) => {
+    set((s) => ({
+      groups: s.groups.map((g) => (g.id === id ? { ...g, ...patch } : g)),
+    }))
+    const updated = get().groups.find((g) => g.id === id)
+    if (updated) void db('editar grupo', supabase.from('groups').update(groupToRow(updated)).eq('id', id))
+  },
+
+  removeGroup: (id) => {
+    const affected: Task[] = []
+    set((s) => ({
+      groups: s.groups.filter((g) => g.id !== id),
+      tasks: s.tasks.map((t) => {
+        if (!t.groupIds.includes(id)) return t
+        const nt = { ...t, groupIds: t.groupIds.filter((gid) => gid !== id) }
+        affected.push(nt)
+        return nt
+      }),
+    }))
+    void db('borrar grupo', supabase.from('groups').delete().eq('id', id))
+    if (affected.length) {
+      void db('actualizar tareas del grupo', supabase.from('tasks').upsert(affected.map(taskToRow)))
+    }
+  },
+
+  moveGroup: (id, dir) => {
+    let changed: Group[] = []
+    set((s) => {
+      const swapped = swap(s.groups, id, dir)
+      changed = diffOrder(s.groups, swapped)
+      return { groups: swapped }
+    })
+    if (changed.length) {
+      void db('reordenar grupos', supabase.from('groups').upsert(changed.map(groupToRow)))
+    }
+  },
+
+  addTask: (t) => {
+    let inserted!: Task
+    set((s) => {
+      inserted = { ...t, id: uid() }
+      return { tasks: [...s.tasks, inserted] }
+    })
+    void db('crear tarea', supabase.from('tasks').insert(taskToRow(inserted)))
+  },
+
+  updateTask: (id, patch) => {
+    const touchedIds = new Set<string>([id])
+
+    set((s) => {
+      const prev = s.tasks.find((t) => t.id === id)
+      let tasks = s.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t))
+
+      // Si se movió la fecha de fin, reprograma en cascada a todo lo que depende de esta tarea.
+      if (prev && patch.end !== undefined && patch.end !== prev.end) {
+        const deltaDays = diffDays(prev.end, patch.end)
+        if (deltaDays !== 0) {
+          const shifted = new Set<string>([id])
+          const queue = [id]
+          while (queue.length) {
+            const cur = queue.shift()!
+            const dependents = tasks.filter(
+              (t) => !shifted.has(t.id) && t.dependsOn?.includes(cur),
+            )
+            for (const d of dependents) {
+              shifted.add(d.id)
+              touchedIds.add(d.id)
+              queue.push(d.id)
+            }
+            if (dependents.length) {
+              const ids = new Set(dependents.map((d) => d.id))
+              tasks = tasks.map((t) =>
+                ids.has(t.id)
+                  ? {
+                      ...t,
+                      start: addDaysISO(t.start, deltaDays),
+                      end: addDaysISO(t.end, deltaDays),
+                    }
+                  : t,
+              )
             }
           }
+        }
+      }
 
-          return { tasks }
+      return { tasks }
+    })
+
+    const touched = get().tasks.filter((t) => touchedIds.has(t.id))
+    if (touched.length) void db('editar tarea', supabase.from('tasks').upsert(touched.map(taskToRow)))
+  },
+
+  removeTask: (id) => {
+    const affected: Task[] = []
+    set((s) => ({
+      tasks: s.tasks
+        .filter((t) => t.id !== id)
+        .map((t) => {
+          if (!t.dependsOn?.includes(id)) return t
+          const nt = { ...t, dependsOn: t.dependsOn.filter((x) => x !== id) }
+          affected.push(nt)
+          return nt
         }),
+    }))
+    void db('borrar tarea', supabase.from('tasks').delete().eq('id', id))
+    if (affected.length) {
+      void db('actualizar dependencias', supabase.from('tasks').upsert(affected.map(taskToRow)))
+    }
+  },
 
-      removeTask: (id) =>
-        set((s) => ({
-          tasks: s.tasks
-            .filter((t) => t.id !== id)
-            .map((t) => ({
-              ...t,
-              dependsOn: t.dependsOn?.filter((x) => x !== id),
-            })),
-        })),
+  addPriority: (p) => {
+    let inserted!: PriorityLevel
+    set((s) => {
+      const order = s.priorities.length
+        ? Math.max(...s.priorities.map((x) => x.order)) + 1
+        : 0
+      inserted = { ...p, id: uid(), order }
+      return { priorities: [...s.priorities, inserted] }
+    })
+    void db('crear prioridad', supabase.from('priorities').insert(priorityToRow(inserted)))
+  },
 
-      addPriority: (p) =>
-        set((s) => ({
-          priorities: [
-            ...s.priorities,
-            {
-              ...p,
-              id: uid(),
-              order: s.priorities.length
-                ? Math.max(...s.priorities.map((x) => x.order)) + 1
-                : 0,
-            },
-          ],
-        })),
+  updatePriority: (id, patch) => {
+    set((s) => ({
+      priorities: s.priorities.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+    }))
+    const updated = get().priorities.find((p) => p.id === id)
+    if (updated)
+      void db('editar prioridad', supabase.from('priorities').update(priorityToRow(updated)).eq('id', id))
+  },
 
-      updatePriority: (id, patch) =>
-        set((s) => ({
-          priorities: s.priorities.map((p) =>
-            p.id === id ? { ...p, ...patch } : p,
-          ),
-        })),
-
-      removePriority: (id) =>
-        set((s) => {
-          if (s.priorities.length <= 1) return s
-          const remaining = s.priorities
-            .filter((p) => p.id !== id)
-            .sort((a, b) => a.order - b.order)
-          const fallback = remaining[0].id
-          return {
-            priorities: remaining,
-            tasks: s.tasks.map((t) =>
-              t.priorityId === id ? { ...t, priorityId: fallback } : t,
-            ),
-          }
+  removePriority: (id) => {
+    const fallbackApplied: Task[] = []
+    let removed = false
+    set((s) => {
+      if (s.priorities.length <= 1) return s
+      const remaining = s.priorities
+        .filter((p) => p.id !== id)
+        .sort((a, b) => a.order - b.order)
+      const fallback = remaining[0].id
+      removed = true
+      return {
+        priorities: remaining,
+        tasks: s.tasks.map((t) => {
+          if (t.priorityId !== id) return t
+          const nt = { ...t, priorityId: fallback }
+          fallbackApplied.push(nt)
+          return nt
         }),
+      }
+    })
+    if (!removed) return
+    void db('borrar prioridad', supabase.from('priorities').delete().eq('id', id))
+    if (fallbackApplied.length) {
+      void db('reasignar prioridad', supabase.from('tasks').upsert(fallbackApplied.map(taskToRow)))
+    }
+  },
 
-      movePriority: (id, dir) =>
-        set((s) => ({ priorities: swap(s.priorities, id, dir) })),
+  movePriority: (id, dir) => {
+    let changed: PriorityLevel[] = []
+    set((s) => {
+      const swapped = swap(s.priorities, id, dir)
+      changed = diffOrder(s.priorities, swapped)
+      return { priorities: swapped }
+    })
+    if (changed.length) {
+      void db('reordenar prioridades', supabase.from('priorities').upsert(changed.map(priorityToRow)))
+    }
+  },
 
-      setSettings: (patch) =>
-        set((s) => ({ settings: { ...s.settings, ...patch } })),
+  setSettings: (patch) => {
+    set((s) => ({ settings: { ...s.settings, ...patch } }))
+    void db('guardar ajustes', supabase.from('settings').upsert(settingsToRow(get().settings)))
+  },
 
-      getData: () => {
-        const { groups, tasks, priorities, settings } = get()
-        return { groups, tasks, priorities, settings }
-      },
+  getData: () => {
+    const { groups, tasks, priorities, settings } = get()
+    return { groups, tasks, priorities, settings }
+  },
 
-      importData: (data) => {
-        const priorities =
-          Array.isArray(data.priorities) && data.priorities.length
-            ? data.priorities
-            : defaultPriorities()
-        // Tareas con prioridad inexistente caen en la primera disponible.
-        const valid = new Set(priorities.map((p) => p.id))
-        set({
-          groups: Array.isArray(data.groups) ? data.groups : [],
-          tasks: (Array.isArray(data.tasks) ? data.tasks : []).map((t) => ({
-            ...t,
-            priorityId: valid.has(t.priorityId) ? t.priorityId : priorities[0].id,
-            groupIds: Array.isArray(t.groupIds) ? t.groupIds : [],
-            offDays: Array.isArray(t.offDays) ? t.offDays : [],
-            dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn : [],
-          })),
-          priorities,
-          settings: {
-            colorBy: data.settings?.colorBy === 'status' ? 'status' : 'priority',
-            holidays: Array.isArray(data.settings?.holidays)
-              ? data.settings.holidays
-              : [],
-          },
-        })
-      },
+  importData: (data) => {
+    const priorities =
+      Array.isArray(data.priorities) && data.priorities.length
+        ? data.priorities
+        : defaultPriorities()
+    // Tareas con prioridad inexistente caen en la primera disponible.
+    const valid = new Set(priorities.map((p) => p.id))
+    const groups = Array.isArray(data.groups) ? data.groups : []
+    const tasks = (Array.isArray(data.tasks) ? data.tasks : []).map((t) => ({
+      ...t,
+      priorityId: valid.has(t.priorityId) ? t.priorityId : priorities[0].id,
+      groupIds: Array.isArray(t.groupIds) ? t.groupIds : [],
+      offDays: Array.isArray(t.offDays) ? t.offDays : [],
+      dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn : [],
+    }))
+    const settings: Settings = {
+      colorBy: data.settings?.colorBy === 'status' ? 'status' : 'priority',
+      holidays: Array.isArray(data.settings?.holidays) ? data.settings.holidays : [],
+    }
+    set({ groups, tasks, priorities, settings })
+    void replaceAllRemote({ groups, tasks, priorities, settings })
+  },
 
-      clearData: () => set(emptyData()),
+  clearData: () => {
+    const data = emptyData()
+    set(data)
+    void replaceAllRemote(data)
+  },
 
-      loadExample: () => set(seedData()),
-    }),
-    {
-      name: 'planificador-cuadrillas',
-      version: 1,
-    },
-  ),
-)
+  loadExample: () => {
+    const data = seedData()
+    set(data)
+    void replaceAllRemote(data)
+  },
+}))

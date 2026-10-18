@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useStore } from '../store/useStore'
+import { useAuthStore } from '../store/useAuthStore'
 import { formatDay } from '../lib/dates'
 import { Field, Modal, btnPrimary, btnSecondary, inputCls } from './Modal'
 
@@ -8,6 +9,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const setSettings = useStore((s) => s.setSettings)
   const clearData = useStore((s) => s.clearData)
   const loadExample = useStore((s) => s.loadExample)
+  const session = useAuthStore((s) => s.session)
+  const signOut = useAuthStore((s) => s.signOut)
 
   const [newHoliday, setNewHoliday] = useState('')
   const holidays = [...settings.holidays].sort()
@@ -123,6 +126,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               Borrar todo
             </button>
           </div>
+        </section>
+
+        <section>
+          <h3 className="mb-1 text-sm font-semibold text-slate-800">Cuenta</h3>
+          <p className="mb-2 text-xs text-slate-500">Conectado como {session?.user.email}.</p>
+          <button className={btnSecondary} onClick={() => signOut()}>
+            Cerrar sesión
+          </button>
         </section>
       </div>
     </Modal>
