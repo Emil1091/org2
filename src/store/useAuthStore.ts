@@ -6,9 +6,8 @@ interface AuthStore {
   session: Session | null
   authReady: boolean
   error: string | null
-  linkSent: boolean
   init: () => void
-  sendMagicLink: (email: string) => Promise<void>
+  signIn: (email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
 }
 
@@ -16,7 +15,6 @@ export const useAuthStore = create<AuthStore>()((set) => ({
   session: null,
   authReady: false,
   error: null,
-  linkSent: false,
 
   init: () => {
     supabase.auth.getSession().then(({ data }) => {
@@ -29,16 +27,16 @@ export const useAuthStore = create<AuthStore>()((set) => ({
     })
   },
 
-  sendMagicLink: async (email) => {
-    set({ error: null, linkSent: false })
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: window.location.origin },
-    })
+  signIn: async (email, password) => {
+    set({ error: null })
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) {
-      set({ error: error.message })
-    } else {
-      set({ linkSent: true })
+      set({
+        error:
+          error.message === 'Invalid login credentials'
+            ? 'Email o contraseña incorrectos.'
+            : error.message,
+      })
     }
   },
 
