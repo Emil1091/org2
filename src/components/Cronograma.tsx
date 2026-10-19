@@ -33,6 +33,16 @@ const ROW_PAD = 8
 const LANE_H = 32
 const BAR_H = 24
 const UNASSIGNED_ID = '__unassigned__'
+const COLLAPSED_KEY = 'gantt-collapsed-rows'
+
+function readCollapsed(): Set<string> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]')
+    return new Set(Array.isArray(raw) ? raw.filter((x) => typeof x === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
 
 interface Segment {
   key: string
@@ -214,6 +224,19 @@ export function Cronograma({
   const updateTask = useStore((s) => s.updateTask)
 
   const [zoom, setZoom] = useState<Zoom>('day')
+  const [collapsed, setCollapsed] = useState<Set<string>>(readCollapsed)
+  const toggleCollapsed = (id: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      try {
+        localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]))
+      } catch {
+        // sin localStorage la preferencia dura solo la sesión
+      }
+      return next
+    })
   const [preset, setPreset] = useState<Preset>('weeks3')
   const [view, setView] = useState(() => ({
     start: weekStartISO(todayISO()),
@@ -625,7 +648,8 @@ export function Cronograma({
                     t.end >= viewStart,
                 )
                 const { placed, lanes } = buildPlaced(rowTasks, viewStart, span)
-                const rowH = lanes * LANE_H + ROW_PAD * 2
+                const isCollapsed = collapsed.has(g.id)
+                const rowH = (isCollapsed ? 1 : lanes) * LANE_H + ROW_PAD * 2
                 const isDropTarget =
                   drag?.mode === 'move' && drag.hoverRowId === g.id && drag.fromRowId !== g.id
                 const isHoverRow =
@@ -651,6 +675,15 @@ export function Cronograma({
                       className="sticky left-0 z-30 flex items-center gap-1.5 border-r-2 border-slate-300 bg-white px-3"
                       style={{ width: LEFT_W, minWidth: LEFT_W }}
                     >
+                      <button
+                        className="-ml-1.5 w-4 shrink-0 text-sm leading-none text-slate-500 hover:text-slate-800"
+                        onClick={() => toggleCollapsed(g.id)}
+                        title={isCollapsed ? 'Expandir fila' : 'Colapsar fila'}
+                        aria-label={`${isCollapsed ? 'Expandir' : 'Colapsar'} ${g.name}`}
+                        aria-expanded={!isCollapsed}
+                      >
+                        {isCollapsed ? '▸' : '▾'}
+                      </button>
                       <span
                         className="h-3 w-3 shrink-0 rounded-full"
                         style={{ background: g.color }}
@@ -689,6 +722,14 @@ export function Cronograma({
                       >
                         {rowTasks.length}
                       </span>
+                      {isCollapsed && lanes > 1 && (
+                        <span
+                          className="shrink-0 rounded-full border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800"
+                          title={`Fila colapsada: hay ${lanes - 1} tarea${lanes - 1 === 1 ? '' : 's'} más superpuesta${lanes - 1 === 1 ? '' : 's'} en paralelo. Tocá ▸ para expandir.`}
+                        >
+                          +{lanes - 1}
+                        </span>
+                      )}
                       {!isUnassigned && (
                         <div className="flex shrink-0 opacity-0 transition-opacity group-hover/row:opacity-100">
                           <button
@@ -709,8 +750,18 @@ export function Cronograma({
                       )}
                     </div>
 
-                    <div className="relative" style={{ width: totalW }}>
-                      {placed.map(({ task: t, lane }) => {
+                    <div
+                      className="relative"
+                      style={{
+                        width: totalW,
+                        backgroundImage: isCollapsed
+                          ? 'repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--color-slate-400) 18%, transparent) 6px 8px)'
+                          : undefined,
+                      }}
+                      title={isCollapsed ? 'Fila colapsada' : undefined}
+                    >
+                      {placed.map(({ task: t, lane: realLane }) => {
+                        const lane = isCollapsed ? 0 : realLane
                         const preview =
                           drag && drag.taskId === t.id
                             ? applyDelta(drag, drag.delta)
