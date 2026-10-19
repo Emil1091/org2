@@ -34,6 +34,34 @@ const LANE_H = 32
 const BAR_H = 24
 const UNASSIGNED_ID = '__unassigned__'
 const COLLAPSED_KEY = 'gantt-collapsed-rows'
+const VIEW_PREFS_KEY = 'gantt-view-prefs'
+
+function readViewPrefs(): { preset: Preset; zoom: Zoom } {
+  try {
+    const raw = JSON.parse(localStorage.getItem(VIEW_PREFS_KEY) ?? '{}')
+    const preset: Preset = (['week', 'weeks3', 'month'] as Preset[]).includes(raw.preset)
+      ? raw.preset
+      : 'month'
+    const zoom: Zoom = (['day', 'week', 'month'] as Zoom[]).includes(raw.zoom) ? raw.zoom : 'day'
+    return { preset, zoom }
+  } catch {
+    return { preset: 'month', zoom: 'day' }
+  }
+}
+
+function saveViewPrefs(preset: Preset, zoom: Zoom) {
+  try {
+    localStorage.setItem(VIEW_PREFS_KEY, JSON.stringify({ preset, zoom }))
+  } catch {
+    // sin localStorage la preferencia dura solo la sesión
+  }
+}
+
+function viewForPreset(p: Preset, today: string) {
+  if (p === 'week') return { start: weekStartISO(today), span: 7 }
+  if (p === 'weeks3') return { start: weekStartISO(today), span: 21 }
+  return { start: monthStartISO(today), span: daysInMonthISO(today) }
+}
 
 function readCollapsed(): Set<string> {
   try {
@@ -246,7 +274,7 @@ export function Cronograma({
   const moveGroup = useStore((s) => s.moveGroup)
   const updateTask = useStore((s) => s.updateTask)
 
-  const [zoom, setZoom] = useState<Zoom>('day')
+  const [zoom, setZoom] = useState<Zoom>(() => readViewPrefs().zoom)
   const [collapsed, setCollapsed] = useState<Set<string>>(readCollapsed)
   const toggleCollapsed = (id: string) =>
     setCollapsed((prev) => {
@@ -260,11 +288,8 @@ export function Cronograma({
       }
       return next
     })
-  const [preset, setPreset] = useState<Preset>('weeks3')
-  const [view, setView] = useState(() => ({
-    start: weekStartISO(todayISO()),
-    span: 21,
-  }))
+  const [preset, setPreset] = useState<Preset>(() => readViewPrefs().preset)
+  const [view, setView] = useState(() => viewForPreset(readViewPrefs().preset, todayISO()))
 
   const today = todayISO()
   const viewStart = view.start
@@ -307,10 +332,8 @@ export function Cronograma({
 
   const applyPreset = (p: Preset) => {
     setPreset(p)
-    const t = todayISO()
-    if (p === 'week') setView({ start: weekStartISO(t), span: 7 })
-    else if (p === 'weeks3') setView({ start: weekStartISO(t), span: 21 })
-    else setView({ start: monthStartISO(t), span: daysInMonthISO(t) })
+    setView(viewForPreset(p, todayISO()))
+    saveViewPrefs(p, zoom)
   }
 
   const shift = (dir: -1 | 1) => {
@@ -328,7 +351,12 @@ export function Cronograma({
 
   const setZoomMode = (z: Zoom) => {
     setZoom(z)
-    if (z === 'month') applyPreset('month')
+    const nextPreset = z === 'month' ? 'month' : preset
+    if (nextPreset !== preset) {
+      setPreset(nextPreset)
+      setView(viewForPreset(nextPreset, todayISO()))
+    }
+    saveViewPrefs(nextPreset, z)
   }
 
   const segments =
