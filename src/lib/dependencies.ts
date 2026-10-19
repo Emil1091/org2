@@ -1,4 +1,5 @@
 import type { Task } from '../types'
+import { addDaysISO } from './dates'
 
 /** True si hacer que `taskId` dependa de `dependsOn` generaría un ciclo. */
 export function wouldCreateCycle(tasks: Task[], taskId: string, dependsOn: string[]): boolean {
@@ -29,4 +30,18 @@ export function hasDependencyConflict(tasks: Task[], t: Task): boolean {
     const dep = byId.get(id)
     return dep !== undefined && dep.end >= t.start
   })
+}
+
+/** Primer día en que puede arrancar una tarea con estas dependencias (el siguiente a la que termine más tarde), o null si no depende de nada. */
+export function minStartFor(tasks: Task[], dependsOn: string[] | undefined): string | null {
+  if (!dependsOn?.length) return null
+  const byId = new Map(tasks.map((x) => [x.id, x]))
+  let min: string | null = null
+  for (const id of dependsOn) {
+    const dep = byId.get(id)
+    if (!dep) continue
+    const candidate = addDaysISO(dep.end, 1)
+    if (min === null || candidate > min) min = candidate
+  }
+  return min
 }

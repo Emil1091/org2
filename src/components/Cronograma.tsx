@@ -21,7 +21,7 @@ import {
   workdayCount,
 } from '../lib/dates'
 import { contrastText } from '../lib/colors'
-import { directDependents, hasDependencyConflict } from '../lib/dependencies'
+import { directDependents, hasDependencyConflict, minStartFor } from '../lib/dependencies'
 import { btnPrimary } from './Modal'
 
 type Zoom = 'day' | 'week' | 'month'
@@ -105,6 +105,8 @@ interface DragState {
   clientX: number
   clientY: number
   hoverRowId?: string
+  /** Primer día posible según las dependencias de la tarea, o null si no depende de nada. */
+  minStart: string | null
 }
 
 /** Id de la fila (cuadrilla o "Pendientes") cuyo rect contiene `clientY`. */
@@ -124,20 +126,25 @@ function reassignRow(groupIds: string[], from: string, to: string): string[] {
   return withoutFrom.includes(to) ? withoutFrom : [...withoutFrom, to]
 }
 
-/** Fechas resultantes de arrastrar `delta` días según el modo. */
+/** Fechas resultantes de arrastrar `delta` días según el modo, sin cruzar `minStart` si depende de otra tarea. */
 function applyDelta(
-  d: Pick<DragState, 'mode' | 'origStart' | 'origEnd'>,
+  d: Pick<DragState, 'mode' | 'origStart' | 'origEnd' | 'minStart'>,
   delta: number,
 ): { start: string; end: string } {
   if (d.mode === 'move') {
-    return {
-      start: addDaysISO(d.origStart, delta),
-      end: addDaysISO(d.origEnd, delta),
+    let start = addDaysISO(d.origStart, delta)
+    let end = addDaysISO(d.origEnd, delta)
+    if (d.minStart && start < d.minStart) {
+      end = addDaysISO(end, diffDays(start, d.minStart))
+      start = d.minStart
     }
+    return { start, end }
   }
   if (d.mode === 'resize-l') {
-    const start = addDaysISO(d.origStart, delta)
-    return { start: start > d.origEnd ? d.origEnd : start, end: d.origEnd }
+    let start = addDaysISO(d.origStart, delta)
+    if (start > d.origEnd) start = d.origEnd
+    if (d.minStart && start < d.minStart) start = d.minStart > d.origEnd ? d.origEnd : d.minStart
+    return { start, end: d.origEnd }
   }
   const end = addDaysISO(d.origEnd, delta)
   return { start: d.origStart, end: end < d.origStart ? d.origStart : end }
@@ -488,6 +495,7 @@ export function Cronograma({
       moved: false,
       clientX: e.clientX,
       clientY: e.clientY,
+      minStart: minStartFor(tasks, t.dependsOn),
     }
     dragRef.current = d
     setDrag(d)

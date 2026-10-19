@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useStore } from '../store/useStore'
 import { STATUS_META, STATUS_ORDER, type Task, type TaskStatus } from '../types'
 import { addDaysISO, diffDays, formatDay, todayISO, workdayCount } from '../lib/dates'
-import { hasDependencyConflict, wouldCreateCycle } from '../lib/dependencies'
+import { hasDependencyConflict, minStartFor, wouldCreateCycle } from '../lib/dependencies'
 import { Field, Modal, btnDanger, btnPrimary, btnSecondary, inputCls } from './Modal'
 
 interface Props {
@@ -56,6 +56,7 @@ export function TaskModal({ taskId, onClose }: Props) {
   const duration = workdayCount(form.start, form.end, saturdayWorks, holidaySet)
 
   const otherTasks = tasks.filter((t) => t.id !== form.id)
+  const minStart = minStartFor(otherTasks, form.dependsOn)
   const toggleDependency = (depId: string) => {
     const has = (form.dependsOn ?? []).includes(depId)
     const next = has
@@ -84,8 +85,8 @@ export function TaskModal({ taskId, onClose }: Props) {
       alert('La tarea necesita un título.')
       return
     }
-    const end = form.end < form.start ? form.start : form.end
-    const start = form.start
+    const start = minStart && form.start < minStart ? minStart : form.start
+    const end = form.end < start ? start : form.end
     const payload = {
       ...form,
       title: form.title.trim(),
@@ -150,12 +151,19 @@ export function TaskModal({ taskId, onClose }: Props) {
           </Field>
         </div>
 
-        <Field label="Inicio estimado">
+        <Field
+          label="Inicio estimado"
+          hint={minStart ? `No puede ser antes del ${formatDay(minStart)} (depende de otra tarea).` : undefined}
+        >
           <input
             type="date"
             className={inputCls}
             value={form.start}
-            onChange={(e) => set({ start: e.target.value || form.start })}
+            min={minStart ?? undefined}
+            onChange={(e) => {
+              const v = e.target.value || form.start
+              set({ start: minStart && v < minStart ? minStart : v })
+            }}
           />
         </Field>
         <Field label="Fin estimado">

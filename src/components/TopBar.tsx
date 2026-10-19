@@ -10,6 +10,8 @@ interface Props {
   onOpenLegend: () => void
   onOpenSettings: () => void
   onOpenAlerts: () => void
+  layout: 'stacked' | 'side'
+  onToggleLayout: () => void
 }
 
 export function TopBar({
@@ -18,6 +20,8 @@ export function TopBar({
   onOpenLegend,
   onOpenSettings,
   onOpenAlerts,
+  layout,
+  onToggleLayout,
 }: Props) {
   const tasks = useStore((s) => s.tasks)
   const groups = useStore((s) => s.groups)
@@ -78,6 +82,14 @@ export function TopBar({
         aria-label={dark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
       >
         {dark ? '☀' : '🌙'}
+      </button>
+      <button
+        className={btnSecondary}
+        onClick={onToggleLayout}
+        title={layout === 'stacked' ? 'Vista lado a lado' : 'Vista apilada'}
+        aria-label={layout === 'stacked' ? 'Vista lado a lado' : 'Vista apilada'}
+      >
+        {layout === 'stacked' ? '⬌' : '⬍'}
       </button>
       <button className={btnSecondary} onClick={onOpenSettings} title="Ajustes">
         ⚙ Ajustes
