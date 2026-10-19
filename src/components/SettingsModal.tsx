@@ -1,9 +1,107 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { useAuthStore } from '../store/useAuthStore'
 import { formatDay } from '../lib/dates'
 import { exportJSON, parseImport } from '../lib/exportImport'
+import { supabase } from '../lib/supabaseClient'
 import { Field, Modal, btnPrimary, btnSecondary, inputCls } from './Modal'
+
+interface BackupRow {
+  id: string
+  kind: 'live' | 'interval'
+  created_at: string
+}
+
+function timeAgo(iso: string): string {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
+  if (mins < 1) return 'recién'
+  if (mins < 60) return `hace ${mins} min`
+  const hours = Math.round(mins / 60)
+  if (hours < 24) return `hace ${hours} h`
+  return `hace ${Math.round(hours / 24)} d`
+}
+
+function BackupsSection() {
+  const [backups, setBackups] = useState<BackupRow[] | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [restoringId, setRestoringId] = useState<string | null>(null)
+
+  useEffect(() => {
+    supabase
+      .from('backups')
+      .select('id, kind, created_at')
+      .order('created_at', { ascending: false })
+      .then(({ data }) => setBackups((data as BackupRow[] | null) ?? []))
+    supabase
+      .from('admins')
+      .select('user_id', { count: 'exact', head: true })
+      .then(({ count }) => setIsAdmin(!!count))
+  }, [])
+
+  const restore = async (b: BackupRow) => {
+    const when = b.kind === 'live' ? 'el último guardado' : `el respaldo de ${timeAgo(b.created_at)}`
+    if (
+      !confirm(
+        `¿Reemplazar TODO el plan del equipo con ${when} (${formatDay(b.created_at.slice(0, 10))})? Se guarda un respaldo del estado actual antes de hacerlo.`,
+      )
+    )
+      return
+    setRestoringId(b.id)
+    const { error } = await supabase.rpc('restore_backup', { p_backup_id: b.id })
+    setRestoringId(null)
+    if (error) alert(`No se pudo restaurar: ${error.message}`)
+    else alert('Restaurado. Puede tardar un segundo en reflejarse en pantalla.')
+  }
+
+  if (backups === null) return null
+
+  const live = backups.find((b) => b.kind === 'live')
+  const intervals = backups.filter((b) => b.kind === 'interval')
+
+  return (
+    <section>
+      <h3 className="mb-1 text-sm font-semibold text-slate-800">Respaldos</h3>
+      <p className="mb-2 text-xs text-slate-500">
+        Uno se guarda con cada cambio, y otro cada 30 minutos (hasta 4).
+        {!isAdmin && ' Solo un administrador puede restaurar.'}
+      </p>
+      <ul className="flex flex-col gap-1 text-xs text-slate-600">
+        {live && (
+          <li className="flex items-center justify-between gap-2 rounded-md bg-slate-50 px-2 py-1.5">
+            <span>Último guardado — {timeAgo(live.created_at)}</span>
+            {isAdmin && (
+              <button
+                className="shrink-0 rounded-md border border-slate-300 bg-white px-2 py-0.5 hover:bg-slate-50"
+                disabled={restoringId !== null}
+                onClick={() => void restore(live)}
+              >
+                {restoringId === live.id ? 'Restaurando…' : 'Restaurar'}
+              </button>
+            )}
+          </li>
+        )}
+        {intervals.map((b) => (
+          <li
+            key={b.id}
+            className="flex items-center justify-between gap-2 rounded-md bg-slate-50 px-2 py-1.5"
+          >
+            <span>Automático — {timeAgo(b.created_at)}</span>
+            {isAdmin && (
+              <button
+                className="shrink-0 rounded-md border border-slate-300 bg-white px-2 py-0.5 hover:bg-slate-50"
+                disabled={restoringId !== null}
+                onClick={() => void restore(b)}
+              >
+                {restoringId === b.id ? 'Restaurando…' : 'Restaurar'}
+              </button>
+            )}
+          </li>
+        ))}
+        {!live && intervals.length === 0 && <li className="text-slate-400">Todavía no hay respaldos.</li>}
+      </ul>
+    </section>
+  )
+}
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const settings = useStore((s) => s.settings)
@@ -159,6 +257,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             </button>
           </div>
         </section>
+
+        <BackupsSection />
 
         <section>
           <h3 className="mb-1 text-sm font-semibold text-slate-800">Cuenta</h3>
