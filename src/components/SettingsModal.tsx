@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { useAuthStore } from '../store/useAuthStore'
 import { formatDay } from '../lib/dates'
+import { exportJSON, parseImport } from '../lib/exportImport'
 import { Field, Modal, btnPrimary, btnSecondary, inputCls } from './Modal'
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
@@ -9,8 +10,23 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const setSettings = useStore((s) => s.setSettings)
   const clearData = useStore((s) => s.clearData)
   const loadExample = useStore((s) => s.loadExample)
+  const getData = useStore((s) => s.getData)
+  const importData = useStore((s) => s.importData)
   const session = useAuthStore((s) => s.session)
   const signOut = useAuthStore((s) => s.signOut)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const onImportFile = async (file: File | undefined) => {
+    if (!file) return
+    try {
+      const data = parseImport(await file.text())
+      if (!confirm('¿Reemplazar todo el plan del equipo con el contenido del archivo?')) return
+      importData(data)
+      alert('Plan importado correctamente.')
+    } catch (err) {
+      alert(`No se pudo importar: ${err instanceof Error ? err.message : 'archivo inválido'}`)
+    }
+  }
 
   const [newHoliday, setNewHoliday] = useState('')
   const holidays = [...settings.holidays].sort()
@@ -100,10 +116,26 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         <section>
           <h3 className="mb-1 text-sm font-semibold text-slate-800">Datos</h3>
           <p className="mb-2 text-xs text-slate-500">
-            Los datos se guardan en este navegador. Usá «Exportar» de la barra superior
-            para compartir el plan (JSON).
+            El plan es compartido por todo el equipo. Exportá una copia en JSON como respaldo;
+            importar o borrar reemplaza los datos para todos.
           </p>
           <div className="flex flex-wrap gap-2">
+            <button className={btnSecondary} onClick={() => exportJSON(getData())}>
+              ⬆ Exportar
+            </button>
+            <button className={btnSecondary} onClick={() => fileRef.current?.click()}>
+              ⬇ Importar
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                void onImportFile(e.target.files?.[0])
+                e.target.value = ''
+              }}
+            />
             <button
               className={btnSecondary}
               onClick={() => {

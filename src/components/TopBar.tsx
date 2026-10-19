@@ -1,6 +1,5 @@
-import { useMemo, useRef } from 'react'
+import { useMemo } from 'react'
 import { useStore } from '../store/useStore'
-import { exportJSON, parseImport } from '../lib/exportImport'
 import { computeAlerts } from '../lib/alerts'
 import { todayISO } from '../lib/dates'
 import { btnPrimary, btnSecondary } from './Modal'
@@ -20,29 +19,14 @@ export function TopBar({
   onOpenSettings,
   onOpenAlerts,
 }: Props) {
-  const getData = useStore((s) => s.getData)
-  const importData = useStore((s) => s.importData)
   const tasks = useStore((s) => s.tasks)
   const groups = useStore((s) => s.groups)
   const holidays = useStore((s) => s.settings.holidays)
-  const fileRef = useRef<HTMLInputElement>(null)
 
   const alertCount = useMemo(
     () => computeAlerts(tasks, groups, new Set(holidays), todayISO()).length,
     [tasks, groups, holidays],
   )
-
-  const onImportFile = async (file: File | undefined) => {
-    if (!file) return
-    try {
-      const text = await file.text()
-      const data = parseImport(text)
-      importData(data)
-      alert('Plan importado correctamente.')
-    } catch (err) {
-      alert(`No se pudo importar: ${err instanceof Error ? err.message : 'archivo inválido'}`)
-    }
-  }
 
   return (
     <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-4 py-2.5">
@@ -78,30 +62,6 @@ export function TopBar({
       <button className={btnSecondary} onClick={onOpenSettings} title="Ajustes">
         ⚙ Ajustes
       </button>
-      <button
-        className={btnSecondary}
-        onClick={() => exportJSON(getData())}
-        title="Descargar el plan como JSON"
-      >
-        ⬆ Exportar
-      </button>
-      <button
-        className={btnSecondary}
-        onClick={() => fileRef.current?.click()}
-        title="Importar un plan JSON"
-      >
-        ⬇ Importar
-      </button>
-      <input
-        ref={fileRef}
-        type="file"
-        accept="application/json,.json"
-        className="hidden"
-        onChange={(e) => {
-          void onImportFile(e.target.files?.[0])
-          e.target.value = ''
-        }}
-      />
       <button className={btnSecondary} onClick={onNewGroup}>
         + Cuadrilla
       </button>
