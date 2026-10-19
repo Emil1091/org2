@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { computeAlerts } from '../lib/alerts'
 import { todayISO } from '../lib/dates'
@@ -23,6 +23,18 @@ export function TopBar({
   const groups = useStore((s) => s.groups)
   const holidays = useStore((s) => s.settings.holidays)
 
+  const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'))
+  const toggleTheme = () => {
+    const next = !dark
+    document.documentElement.classList.toggle('dark', next)
+    try {
+      localStorage.setItem('theme', next ? 'dark' : 'light')
+    } catch {
+      // sin localStorage la preferencia dura solo la sesión
+    }
+    setDark(next)
+  }
+
   const alertCount = useMemo(
     () => computeAlerts(tasks, groups, new Set(holidays), todayISO()).length,
     [tasks, groups, holidays],
@@ -36,7 +48,7 @@ export function TopBar({
         </span>
         <div className="leading-tight">
           <h1 className="text-sm font-bold text-slate-800">
-            Planificador de Cuadrillas
+            Planificador de Proyectos
           </h1>
           <p className="text-[11px] text-slate-500">
             Cronograma de tareas por grupo de trabajo
@@ -58,6 +70,14 @@ export function TopBar({
       </button>
       <button className={btnSecondary} onClick={onOpenLegend} title="Prioridades y estados">
         🎨 Leyenda
+      </button>
+      <button
+        className={btnSecondary}
+        onClick={toggleTheme}
+        title={dark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+        aria-label={dark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+      >
+        {dark ? '☀' : '🌙'}
       </button>
       <button className={btnSecondary} onClick={onOpenSettings} title="Ajustes">
         ⚙ Ajustes

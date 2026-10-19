@@ -1,5 +1,49 @@
 @import "tailwindcss";
 
+/* Modo oscuro: se redefinen los colores del tema en lugar de agregar `dark:` a cada componente. */
+html.dark {
+  color-scheme: dark;
+  --color-white: #172033;
+  --color-slate-50: #0b1220;
+  --color-slate-100: #0f172a;
+  --color-slate-200: #1f2a3d;
+  --color-slate-300: #334155;
+  --color-slate-400: #64748b;
+  --color-slate-500: #8b9ab0;
+  --color-slate-600: #a8b4c6;
+  --color-slate-700: #cbd5e1;
+  --color-slate-800: #e2e8f0;
+  --color-slate-900: #f1f5f9;
+  --color-slate-950: #f8fafc;
+
+  --color-rose-50: #3b0d18;
+  --color-rose-100: #4c1222;
+  --color-rose-300: #9f1239;
+  --color-rose-400: #fb7185;
+  --color-rose-700: #fda4af;
+  --color-amber-50: #33240a;
+  --color-amber-100: #45310b;
+  --color-amber-200: #6b4c0e;
+  --color-amber-300: #b45309;
+  --color-amber-600: #fbbf24;
+  --color-amber-700: #fcd34d;
+  --color-amber-800: #fde68a;
+  --color-emerald-50: #052e1f;
+  --color-emerald-300: #047857;
+  --color-emerald-700: #6ee7b7;
+  --color-blue-50: #172554;
+  --color-blue-300: #1d4ed8;
+  --color-sky-50: #0c2a3d;
+}
+
+/* En oscuro, --color-white es el fondo de las tarjetas: el texto sobre rojo y el velo de los modales se fijan aparte. */
+html.dark :is(.bg-rose-600, .\!bg-rose-600) {
+  color: #fff;
+}
+html.dark .bg-slate-900\/50 {
+  background-color: rgb(0 0 0 / 0.6);
+}
+
 html,
 body,
 #root {
@@ -18,13 +62,13 @@ body {
   width: 10px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: var(--color-slate-300);
   border-radius: 8px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: var(--color-slate-400);
   background-clip: content-box;
 }
 *::-webkit-scrollbar-track {

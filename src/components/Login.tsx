@@ -20,7 +20,7 @@ export function Login() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
       <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-lg">
-        <h1 className="mb-1 text-lg font-semibold text-slate-800">Planificador de Cuadrillas</h1>
+        <h1 className="mb-1 text-lg font-semibold text-slate-800">Planificador de Proyectos</h1>
         <p className="mb-5 text-sm text-slate-500">Ingresá con tu usuario y contraseña.</p>
 
         <form onSubmit={onSubmit} className="grid gap-4">

@@ -43,6 +43,7 @@ export default function App() {
   const [splitRatio, setSplitRatio] = useState(readSplitRatio)
   const [resizing, setResizing] = useState(false)
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null)
+  const [fullscreen, setFullscreen] = useState(false)
   const mainRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ startY: number; startRatio: number; containerH: number } | null>(null)
 
@@ -90,6 +91,25 @@ export default function App() {
     }
   }, [resizing])
 
+  useEffect(() => {
+    const onChange = () => {
+      if (!document.fullscreenElement) setFullscreen(false)
+    }
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
+
+  const toggleFullscreen = () => {
+    if (fullscreen) {
+      setFullscreen(false)
+      if (document.fullscreenElement) void document.exitFullscreen()
+    } else {
+      setFullscreen(true)
+      // Si el navegador no permite pantalla completa, igual se ocultan las barras.
+      document.documentElement.requestFullscreen?.().catch(() => {})
+    }
+  }
+
   const startResize = (e: RPointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return
     const containerH = mainRef.current?.getBoundingClientRect().height ?? 0
@@ -100,15 +120,17 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col">
-      <TopBar
-        onNewTask={() => setModal({ type: 'task' })}
-        onNewGroup={() => setModal({ type: 'group' })}
-        onOpenLegend={() => setModal({ type: 'legend' })}
-        onOpenSettings={() => setModal({ type: 'settings' })}
-        onOpenAlerts={() => setModal({ type: 'alerts' })}
-      />
+      {!fullscreen && (
+        <TopBar
+          onNewTask={() => setModal({ type: 'task' })}
+          onNewGroup={() => setModal({ type: 'group' })}
+          onOpenLegend={() => setModal({ type: 'legend' })}
+          onOpenSettings={() => setModal({ type: 'settings' })}
+          onOpenAlerts={() => setModal({ type: 'alerts' })}
+        />
+      )}
 
-      {overdueCount > 0 && (
+      {!fullscreen && overdueCount > 0 && (
         <div className="flex shrink-0 items-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
           <span>
             ⚠ Tenés <strong>{overdueCount}</strong> tarea{overdueCount === 1 ? '' : 's'} vencida
@@ -132,6 +154,8 @@ export default function App() {
             onNewGroup={() => setModal({ type: 'group' })}
             onEditGroup={(id) => setModal({ type: 'group', id })}
             hoveredTaskId={hoveredTaskId}
+            fullscreen={fullscreen}
+            onToggleFullscreen={toggleFullscreen}
           />
         </div>
 

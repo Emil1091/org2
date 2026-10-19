@@ -194,9 +194,18 @@ interface Props {
   onNewGroup: () => void
   onEditGroup: (id: string) => void
   hoveredTaskId?: string | null
+  fullscreen: boolean
+  onToggleFullscreen: () => void
 }
 
-export function Cronograma({ onOpenTask, onNewGroup, onEditGroup, hoveredTaskId }: Props) {
+export function Cronograma({
+  onOpenTask,
+  onNewGroup,
+  onEditGroup,
+  hoveredTaskId,
+  fullscreen,
+  onToggleFullscreen,
+}: Props) {
   const groups = useStore((s) => s.groups)
   const tasks = useStore((s) => s.tasks)
   const priorities = useStore((s) => s.priorities)
@@ -226,14 +235,14 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup, hoveredTaskId 
   )
   const ganttRows = useMemo(
     () => [
-      ...sortedGroups,
       {
         id: UNASSIGNED_ID,
         name: 'Pendientes',
         color: '#94a3b8',
         worksSaturday: true,
-        order: sortedGroups.length,
+        order: -1,
       },
+      ...sortedGroups,
     ],
     [sortedGroups],
   )
@@ -412,7 +421,7 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup, hoveredTaskId 
         }px, rgba(100,116,139,0.25) ${dw - 1}px, rgba(100,116,139,0.25) ${dw}px)`
   const weekendBg = `repeating-linear-gradient(to right, transparent 0, transparent ${
     5 * dw
-  }px, #f1f5f9 ${5 * dw}px, #f1f5f9 ${6 * dw}px, #e2e8f0 ${6 * dw}px, #e2e8f0 ${
+  }px, var(--color-slate-100) ${5 * dw}px, var(--color-slate-100) ${6 * dw}px, var(--color-slate-200) ${6 * dw}px, var(--color-slate-200) ${
     7 * dw
   }px)`
 
@@ -488,6 +497,15 @@ export function Cronograma({ onOpenTask, onNewGroup, onEditGroup, hoveredTaskId 
               </button>
             </div>
           </div>
+
+          <button
+            className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
+            onClick={onToggleFullscreen}
+            title={fullscreen ? 'Salir de pantalla completa (Esc)' : 'Pantalla completa'}
+            aria-label={fullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+          >
+            {fullscreen ? '✕ Salir' : '⛶'}
+          </button>
         </div>
       </div>
 
