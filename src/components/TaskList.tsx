@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../store/useStore'
-import { STATUS_META, STATUS_ORDER, type Task } from '../types'
+import { STATUS_META, STATUS_ORDER, type Task, type TaskStatus } from '../types'
 import { formatDay, workdayCount } from '../lib/dates'
 import { exportTasksCSV } from '../lib/exportImport'
 import { btnPrimary, btnSecondary } from './Modal'
@@ -19,13 +19,22 @@ interface Props {
   onOpenTask: (id: string) => void
   onNewTask: () => void
   onHoverTask?: (id: string | null) => void
+  panelCollapsed: boolean
+  onTogglePanelCollapsed: () => void
 }
 
-export function TaskList({ onOpenTask, onNewTask, onHoverTask }: Props) {
+export function TaskList({
+  onOpenTask,
+  onNewTask,
+  onHoverTask,
+  panelCollapsed,
+  onTogglePanelCollapsed,
+}: Props) {
   const tasks = useStore((s) => s.tasks)
   const groups = useStore((s) => s.groups)
   const priorities = useStore((s) => s.priorities)
   const holidays = useStore((s) => s.settings.holidays)
+  const updateTask = useStore((s) => s.updateTask)
 
   const [sortKey, setSortKey] = useState<SortKey>('start')
   const [dir, setDir] = useState<1 | -1>(1)
@@ -33,6 +42,10 @@ export function TaskList({ onOpenTask, onNewTask, onHoverTask }: Props) {
   const gmap = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups])
   const pmap = useMemo(() => new Map(priorities.map((p) => [p.id, p])), [priorities])
   const hset = useMemo(() => new Set(holidays), [holidays])
+  const sortedPriorities = useMemo(
+    () => [...priorities].sort((a, b) => a.order - b.order),
+    [priorities],
+  )
 
   const satWorks = (t: Task) =>
     t.groupIds.length === 0
@@ -96,12 +109,23 @@ export function TaskList({ onOpenTask, onNewTask, onHoverTask }: Props) {
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
+        <button
+          className="text-sm leading-none text-slate-500 hover:text-slate-800"
+          onClick={onTogglePanelCollapsed}
+          title={panelCollapsed ? 'Expandir lista de tareas' : 'Colapsar lista de tareas'}
+          aria-label={panelCollapsed ? 'Expandir lista de tareas' : 'Colapsar lista de tareas'}
+          aria-expanded={!panelCollapsed}
+        >
+          {panelCollapsed ? '▸' : '▾'}
+        </button>
         <h2 className="text-sm font-semibold text-slate-800">
           Tareas ({tasks.length})
         </h2>
-        <span className="hidden text-xs text-slate-400 sm:inline">
-          clic en una fila para editar
-        </span>
+        {!panelCollapsed && (
+          <span className="hidden text-xs text-slate-400 sm:inline">
+            clic en una fila para editar
+          </span>
+        )}
         <div className="ml-auto flex gap-2">
           <button
             className={btnSecondary}
@@ -117,6 +141,7 @@ export function TaskList({ onOpenTask, onNewTask, onHoverTask }: Props) {
         </div>
       </div>
 
+      {panelCollapsed ? null : (
       <div className="min-h-0 flex-1 overflow-auto">
         {tasks.length === 0 ? (
           <p className="p-6 text-center text-sm text-slate-500">
@@ -187,28 +212,37 @@ export function TaskList({ onOpenTask, onNewTask, onHoverTask }: Props) {
                     <td className="px-3 py-2 whitespace-nowrap">{formatDay(t.start)}</td>
                     <td className="px-3 py-2 whitespace-nowrap">{formatDay(t.end)}</td>
                     <td className="px-3 py-2 text-center tabular-nums">{duration(t)}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      <span
-                        className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium"
+                    <td className="px-3 py-2 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                      <select
+                        className="cursor-pointer rounded-full border-0 py-0.5 pr-6 pl-2 text-[11px] font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
                         style={{ background: `${status.color}22`, color: status.color }}
+                        value={t.status}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => updateTask(t.id, { status: e.target.value as TaskStatus })}
+                        title="Cambiar estado"
                       >
-                        {status.icon} {status.label}
-                      </span>
+                        {STATUS_ORDER.map((s) => (
+                          <option key={s} value={s}>
+                            {STATUS_META[s].icon} {STATUS_META[s].label}
+                          </option>
+                        ))}
+                      </select>
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      {prio && (
-                        <span
-                          className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium"
-                          style={{ background: `${prio.color}22`, color: prio.color }}
-                          title={prio.description}
-                        >
-                          <span
-                            className="h-2 w-2 rounded-full"
-                            style={{ background: prio.color }}
-                          />
-                          {prio.name}
-                        </span>
-                      )}
+                    <td className="px-3 py-2 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                      <select
+                        className="cursor-pointer rounded-full border-0 py-0.5 pr-6 pl-2 text-[11px] font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                        style={{ background: `${(prio ?? sortedPriorities[0])?.color}22`, color: (prio ?? sortedPriorities[0])?.color }}
+                        value={t.priorityId}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => updateTask(t.id, { priorityId: e.target.value })}
+                        title="Cambiar prioridad"
+                      >
+                        {sortedPriorities.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-2">
@@ -242,6 +276,7 @@ export function TaskList({ onOpenTask, onNewTask, onHoverTask }: Props) {
           </table>
         )}
       </div>
+      )}
     </section>
   )
 }

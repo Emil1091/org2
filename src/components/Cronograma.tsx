@@ -257,6 +257,8 @@ interface Props {
   hoveredTaskId?: string | null
   fullscreen: boolean
   onToggleFullscreen: () => void
+  panelCollapsed: boolean
+  onTogglePanelCollapsed: () => void
 }
 
 export function Cronograma({
@@ -266,6 +268,8 @@ export function Cronograma({
   hoveredTaskId,
   fullscreen,
   onToggleFullscreen,
+  panelCollapsed,
+  onTogglePanelCollapsed,
 }: Props) {
   const groups = useStore((s) => s.groups)
   const tasks = useStore((s) => s.tasks)
@@ -511,11 +515,23 @@ export function Cronograma({
   return (
     <section className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-slate-200 px-3 py-2">
+        <button
+          className="text-sm leading-none text-slate-500 hover:text-slate-800"
+          onClick={onTogglePanelCollapsed}
+          title={panelCollapsed ? 'Expandir cronograma' : 'Colapsar cronograma'}
+          aria-label={panelCollapsed ? 'Expandir cronograma' : 'Colapsar cronograma'}
+          aria-expanded={!panelCollapsed}
+        >
+          {panelCollapsed ? '▸' : '▾'}
+        </button>
         <h2 className="text-sm font-semibold text-slate-800">Cronograma</h2>
-        <span className="text-xs text-slate-500">
-          {formatDay(viewStart)} – {formatDay(viewEnd)}
-        </span>
+        {!panelCollapsed && (
+          <span className="text-xs text-slate-500">
+            {formatDay(viewStart)} – {formatDay(viewEnd)}
+          </span>
+        )}
 
+        {!panelCollapsed && (
         <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
           <div className="flex items-center gap-1">
             <button
@@ -585,9 +601,10 @@ export function Cronograma({
             {fullscreen ? '✕ Salir' : '⛶'}
           </button>
         </div>
+        )}
       </div>
 
-      {groups.length === 0 ? (
+      {panelCollapsed ? null : groups.length === 0 ? (
         <div className="grid flex-1 place-items-center p-8">
           <div className="text-center">
             <p className="text-4xl">🗓</p>

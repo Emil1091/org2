@@ -20,6 +20,7 @@ type ModalState =
   | { type: 'alerts' }
   | null
 
+const PANELS_KEY = 'gantt-panels-collapsed'
 const SPLIT_KEY = 'gantt-split-ratio'
 const DEFAULT_SPLIT = 0.68
 const MIN_SPLIT = 0.3
@@ -38,12 +39,37 @@ function readSplitRatio(): number {
   }
 }
 
+type PanelId = 'crono' | 'tasks'
+
+function readCollapsedPanels(): Record<PanelId, boolean> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PANELS_KEY) ?? '{}')
+    return { crono: !!raw.crono, tasks: !!raw.tasks }
+  } catch {
+    return { crono: false, tasks: false }
+  }
+}
+
+const PANEL_HEADER_H = 45
+
 export default function App() {
   const [modal, setModal] = useState<ModalState>(null)
   const [splitRatio, setSplitRatio] = useState(readSplitRatio)
   const [resizing, setResizing] = useState(false)
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
+  const [collapsedPanels, setCollapsedPanels] = useState<Record<PanelId, boolean>>(readCollapsedPanels)
+
+  const togglePanel = (id: PanelId) =>
+    setCollapsedPanels((prev) => {
+      const next = { ...prev, [id]: !prev[id] }
+      try {
+        localStorage.setItem(PANELS_KEY, JSON.stringify(next))
+      } catch {
+        // sin localStorage la preferencia dura solo la sesión
+      }
+      return next
+    })
   const mainRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ startY: number; startRatio: number; containerH: number } | null>(null)
 
@@ -147,7 +173,17 @@ export default function App() {
 
       <main ref={mainRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
         <div
-          style={{ flexGrow: splitRatio, flexBasis: 0, flexShrink: 1, minHeight: CRONO_MIN_H, overflow: 'hidden' }}
+          style={
+            collapsedPanels.crono
+              ? { flexGrow: 0, flexShrink: 0, height: PANEL_HEADER_H, overflow: 'hidden' }
+              : {
+                  flexGrow: collapsedPanels.tasks ? 1 : splitRatio,
+                  flexBasis: 0,
+                  flexShrink: 1,
+                  minHeight: CRONO_MIN_H,
+                  overflow: 'hidden',
+                }
+          }
         >
           <Cronograma
             onOpenTask={(id) => setModal({ type: 'task', id })}
@@ -156,21 +192,31 @@ export default function App() {
             hoveredTaskId={hoveredTaskId}
             fullscreen={fullscreen}
             onToggleFullscreen={toggleFullscreen}
+            panelCollapsed={collapsedPanels.crono}
+            onTogglePanelCollapsed={() => togglePanel('crono')}
           />
         </div>
 
-        <SplitHandle onPointerDown={startResize} />
+        {!collapsedPanels.crono && !collapsedPanels.tasks && (
+          <SplitHandle onPointerDown={startResize} />
+        )}
 
         <div
-          style={{
-            flexGrow: 1 - splitRatio,
-            flexBasis: 0,
-            flexShrink: 1,
-            minHeight: TASKLIST_MIN_H,
-            overflow: 'hidden',
-          }}
+          style={
+            collapsedPanels.tasks
+              ? { flexGrow: 0, flexShrink: 0, height: PANEL_HEADER_H, overflow: 'hidden' }
+              : {
+                  flexGrow: collapsedPanels.crono ? 1 : 1 - splitRatio,
+                  flexBasis: 0,
+                  flexShrink: 1,
+                  minHeight: TASKLIST_MIN_H,
+                  overflow: 'hidden',
+                }
+          }
         >
           <TaskList
+            panelCollapsed={collapsedPanels.tasks}
+            onTogglePanelCollapsed={() => togglePanel('tasks')}
             onOpenTask={(id) => setModal({ type: 'task', id })}
             onNewTask={() => setModal({ type: 'task' })}
             onHoverTask={setHoveredTaskId}
