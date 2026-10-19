@@ -1,19 +1,10 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { STATUS_META, STATUS_ORDER, type Task, type TaskStatus } from '../types'
-import { formatDay, workdayCount } from '../lib/dates'
 import { exportTasksCSV } from '../lib/exportImport'
 import { btnPrimary, btnSecondary } from './Modal'
 
-type SortKey =
-  | 'title'
-  | 'groups'
-  | 'start'
-  | 'end'
-  | 'duration'
-  | 'status'
-  | 'priority'
-  | 'progress'
+type SortKey = 'title' | 'groups' | 'status' | 'priority' | 'progress'
 
 interface Props {
   onOpenTask: (id: string) => void
@@ -36,7 +27,7 @@ export function TaskList({
   const holidays = useStore((s) => s.settings.holidays)
   const updateTask = useStore((s) => s.updateTask)
 
-  const [sortKey, setSortKey] = useState<SortKey>('start')
+  const [sortKey, setSortKey] = useState<SortKey>('title')
   const [dir, setDir] = useState<1 | -1>(1)
 
   const gmap = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups])
@@ -46,14 +37,6 @@ export function TaskList({
     () => [...priorities].sort((a, b) => a.order - b.order),
     [priorities],
   )
-
-  const satWorks = (t: Task) =>
-    t.groupIds.length === 0
-      ? true
-      : t.groupIds.some((id) => gmap.get(id)?.worksSaturday)
-
-  const duration = (t: Task) =>
-    workdayCount(t.start, t.end, satWorks(t), new Set([...hset, ...(t.offDays ?? [])]))
 
   const sorted = useMemo(() => {
     const val = (t: Task): string | number => {
@@ -65,12 +48,6 @@ export function TaskList({
             .map((id) => gmap.get(id)?.name ?? '')
             .join(',')
             .toLowerCase()
-        case 'start':
-          return t.start
-        case 'end':
-          return t.end
-        case 'duration':
-          return duration(t)
         case 'status':
           return STATUS_ORDER.indexOf(t.status)
         case 'priority':
@@ -151,11 +128,8 @@ export function TaskList({
           <table className="w-full border-collapse text-sm">
             <thead className="sticky top-0 z-10 bg-slate-50 text-xs text-slate-500">
               <tr>
-                {header('title', 'Título')}
+                {header('title', 'Título', 'w-full')}
                 {header('groups', 'Cuadrillas')}
-                {header('start', 'Inicio')}
-                {header('end', 'Fin')}
-                {header('duration', 'Días lab.')}
                 {header('status', 'Estado')}
                 {header('priority', 'Prioridad')}
                 {header('progress', 'Progreso')}
@@ -174,7 +148,7 @@ export function TaskList({
                     onMouseEnter={() => onHoverTask?.(t.id)}
                     onMouseLeave={() => onHoverTask?.(null)}
                   >
-                    <td className="max-w-72 px-3 py-2">
+                    <td className="max-w-xl px-3 py-2">
                       <div className="truncate font-medium text-slate-800" title={t.title}>
                         {t.title}
                       </div>
@@ -209,9 +183,6 @@ export function TaskList({
                         )}
                       </div>
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap">{formatDay(t.start)}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{formatDay(t.end)}</td>
-                    <td className="px-3 py-2 text-center tabular-nums">{duration(t)}</td>
                     <td className="px-3 py-2 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                       <select
                         className="cursor-pointer rounded-full border-0 py-0.5 pr-6 pl-2 text-[11px] font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
