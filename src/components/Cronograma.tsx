@@ -199,6 +199,29 @@ function buildPlaced(
   return { placed, lanes: Math.max(laneEnds.length, 1) }
 }
 
+/** Una franja de líneas por prioridad, en el orden de la Leyenda (la más urgente arriba). */
+function buildPlacedByPriority(
+  rows: Task[],
+  viewStart: string,
+  span: number,
+  priorityOrder: Map<string, number>,
+): { placed: PlacedBar[]; lanes: number } {
+  const rank = (t: Task) => priorityOrder.get(t.priorityId) ?? Number.MAX_SAFE_INTEGER
+  const byRank = new Map<number, Task[]>()
+  for (const t of rows) {
+    const r = rank(t)
+    byRank.set(r, [...(byRank.get(r) ?? []), t])
+  }
+  const placed: PlacedBar[] = []
+  let offset = 0
+  for (const r of [...byRank.keys()].sort((a, b) => a - b)) {
+    const band = buildPlaced(byRank.get(r)!, viewStart, span)
+    placed.push(...band.placed.map((p) => ({ ...p, lane: p.lane + offset })))
+    offset += band.lanes
+  }
+  return { placed, lanes: Math.max(offset, 1) }
+}
+
 interface Props {
   onOpenTask: (id: string) => void
   onNewGroup: () => void
@@ -271,6 +294,10 @@ export function Cronograma({
   )
   const priorityById = useMemo(
     () => new Map(priorities.map((p) => [p.id, p])),
+    [priorities],
+  )
+  const priorityOrder = useMemo(
+    () => new Map(priorities.map((p) => [p.id, p.order])),
     [priorities],
   )
   const groupNameById = useMemo(
@@ -647,7 +674,9 @@ export function Cronograma({
                     t.start <= viewEnd &&
                     t.end >= viewStart,
                 )
-                const { placed, lanes } = buildPlaced(rowTasks, viewStart, span)
+                const { placed, lanes } = isUnassigned
+                  ? buildPlacedByPriority(rowTasks, viewStart, span, priorityOrder)
+                  : buildPlaced(rowTasks, viewStart, span)
                 const isCollapsed = collapsed.has(g.id)
                 const rowH = (isCollapsed ? 1 : lanes) * LANE_H + ROW_PAD * 2
                 const isDropTarget =
